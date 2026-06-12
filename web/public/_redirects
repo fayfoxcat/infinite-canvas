@@ -1,0 +1,2 @@
+# Cloudflare Pages SPA 重写：画布动态路由使用客户端路由
+/canvas/*  /canvas/_/  200

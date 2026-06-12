@@ -12,6 +12,20 @@ func New() *gin.Engine {
 	router := gin.Default()
 	router.RedirectTrailingSlash = false
 	_ = router.SetTrustedProxies(nil)
+
+	// CORS 中间件：允许 Cloudflare Pages 等前端域名跨域调用
+	router.Use(func(c *gin.Context) {
+		c.Header("Access-Control-Allow-Origin", "*")
+		c.Header("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS")
+		c.Header("Access-Control-Allow-Headers", "Authorization,Content-Type,access-token,x-webdav-target,x-webdav-method,x-webdav-authorization,x-webdav-depth,x-webdav-destination,x-webdav-overwrite,x-webdav-content-type")
+		c.Header("Access-Control-Expose-Headers", "Content-Type,ETag,Last-Modified,DAV")
+		if c.Request.Method == "OPTIONS" {
+			c.AbortWithStatus(204)
+			return
+		}
+		c.Next()
+	})
+
 	api := router.Group("/api")
 	api.GET("/health", func(c *gin.Context) {
 		c.String(http.StatusOK, "ok")
@@ -76,6 +90,9 @@ func New() *gin.Engine {
 	admin.DELETE("/assets/:id", func(c *gin.Context) {
 		handler.AdminDeleteAsset(c.Writer, c.Request, c.Param("id"))
 	})
+
+	// WebDAV 代理：代替 Next.js BFF 转发 WebDAV 请求，绕过浏览器 CORS 限制
+	router.POST("/webdav-proxy", gin.WrapF(handler.WebDAVProxy))
 
 	router.NoRoute(middleware.NotFoundJSON)
 
