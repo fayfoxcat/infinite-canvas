@@ -1,0 +1,25 @@
+# 构建 Go 后端。
+FROM golang:1.25-alpine AS api-build
+
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+COPY config ./config
+COPY handler ./handler
+COPY middleware ./middleware
+COPY model ./model
+COPY repository ./repository
+COPY router ./router
+COPY service ./service
+COPY main.go ./
+RUN CGO_ENABLED=0 go build -o /server .
+
+# 运行镜像：仅 Go 后端，监听 8080。
+FROM alpine:3.22
+
+RUN apk add --no-cache ca-certificates tzdata
+WORKDIR /app
+COPY --from=api-build /server /app/server
+EXPOSE 8080
+ENV PORT=8080
+CMD ["/app/server"]

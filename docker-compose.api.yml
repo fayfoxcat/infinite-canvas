@@ -1,0 +1,11 @@
+services:
+  api:
+    image: fayfoxcat/infinite-canvas-api:latest
+    container_name: infinite-canvas-api
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
