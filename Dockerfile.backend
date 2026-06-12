@@ -1,5 +1,6 @@
 # 后端 Go API 独立镜像（配合 Cloudflare Pages 分离部署）
-FROM golang:1.25-alpine AS build
+# 国内用户构建前请配置 Docker 镜像加速器，或将 FROM 改为镜像站地址
+FROM golang:alpine AS build
 
 WORKDIR /app
 COPY go.mod go.sum ./
