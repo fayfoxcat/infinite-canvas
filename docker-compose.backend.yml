@@ -1,0 +1,11 @@
+services:
+  backend:
+    image: <your-dockerhub-username>/infinite-canvas-backend:latest
+    container_name: infinite-canvas-backend
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
