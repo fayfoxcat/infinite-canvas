@@ -31,8 +31,8 @@ export default function CanvasPage() {
     };
     const createAndEnter = () => {
         const id = createProject(`无限画布 ${projects.length + 1}`);
-        // 等待 zustand persist 写入 localStorage 后再跳转
-        requestAnimationFrame(() => enterProject(id));
+        // 延迟 500ms 等待 zustand persist 完成（400ms 防抖 + 余量）
+        setTimeout(() => enterProject(id), 500);
     };
     const importCanvas = async (file?: File) => {
         if (!file) return;
