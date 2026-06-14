@@ -1,11 +1,9 @@
-import dynamic from "next/dynamic";
-
-const CanvasClientPage = dynamic(() => import("./canvas-client-page"), { ssr: false });
+import CanvasPageShell from "./canvas-page-shell";
 
 export function generateStaticParams() {
     return [{ id: "_" }];
 }
 
 export default function CanvasPage() {
-    return <CanvasClientPage />;
+    return <CanvasPageShell />;
 }
