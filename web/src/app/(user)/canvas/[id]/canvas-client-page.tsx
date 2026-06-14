@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent as ReactChangeEvent, DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, usePathname, useRouter } from "next/navigation";
 import { BookOpen, Home, ImageIcon, Images, List, Menu, MessageSquare, Music2, Plus, Redo2, Settings2, Trash2, Undo2, Upload, Video } from "lucide-react";
 import { saveAs } from "file-saver";
 
@@ -208,8 +208,18 @@ function ConnectionCreateOption({ theme, icon, title, description, onClick }: { 
 function InfiniteCanvasPage() {
     const { message } = App.useApp();
     const params = useParams<{ id: string }>();
+    const pathname = usePathname();
     const router = useRouter();
-    const projectId = params.id;
+    // 静态导出兼容：generateStaticParams 生成 id="_" 占位页面，
+    // Cloudflare _redirects 把 /canvas/* 重写到 /canvas/_/。
+    // 先使用 _ 作为初始值保证 hydration 匹配，再在 useEffect 中提取真实 ID。
+    const [projectId, setProjectId] = useState(params.id);
+    useEffect(() => {
+        const realId = pathname.replace(/^\/canvas\/?/, "").replace(/\/$/, "");
+        if (realId && realId !== "_") {
+            setProjectId(realId);
+        }
+    }, [pathname]);
     const containerRef = useRef<HTMLDivElement>(null);
     const imageInputRef = useRef<HTMLInputElement>(null);
     const uploadTargetRef = useRef<{ nodeId?: string; position?: Position } | null>(null);
