@@ -330,7 +330,8 @@ function InfiniteCanvasPage() {
         setProjectLoaded(false);
         const project = openProject(projectId);
         if (!project) {
-            router.replace("/canvas");
+            // 禁用重定向防止无限刷新
+            console.error("Project not found:", projectId);
             return;
         }
 
