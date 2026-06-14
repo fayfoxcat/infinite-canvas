@@ -29,7 +29,11 @@ export default function CanvasPage() {
     const enterProject = (id: string) => {
         router.push(`/canvas/${id}`);
     };
-    const createAndEnter = () => enterProject(createProject(`无限画布 ${projects.length + 1}`));
+    const createAndEnter = () => {
+        const id = createProject(`无限画布 ${projects.length + 1}`);
+        // 等待 zustand persist 写入 localStorage 后再跳转
+        requestAnimationFrame(() => enterProject(id));
+    };
     const importCanvas = async (file?: File) => {
         if (!file) return;
         try {
