@@ -17,7 +17,7 @@ export default function RootLayout({
     children: React.ReactNode;
 }>) {
     return (
-        <html lang="zh-CN" suppressHydrationWarning className="font-sans">
+        <html lang="zh-CN" suppressHydrationWarning className="font-sans dark" style={{ colorScheme: "dark" }}>
             <body
                 className="bg-background text-foreground antialiased"
                 style={{
@@ -28,7 +28,7 @@ export default function RootLayout({
                     id="theme-script"
                     strategy="beforeInteractive"
                     dangerouslySetInnerHTML={{
-                        __html: `try{var s=JSON.parse(localStorage.getItem("infinite-canvas:theme_store")||"{}");var t=s.state&&s.state.theme==="light"?"light":"dark";document.documentElement.classList.toggle("dark",t==="dark");document.documentElement.style.colorScheme=t}catch(e){}`,
+                        __html: `try{var s=JSON.parse(localStorage.getItem("infinite-canvas:theme_store")||"{}");if(s.state&&s.state.theme==="light"){document.documentElement.classList.toggle("dark",false);document.documentElement.style.colorScheme="light"}}catch(e){}`,
                     }}
                 />
                 <AntdRegistry>
