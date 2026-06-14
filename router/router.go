@@ -2,6 +2,7 @@ package router
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/basketikun/infinite-canvas/handler"
 	"github.com/basketikun/infinite-canvas/middleware"
@@ -13,16 +14,31 @@ func New() *gin.Engine {
 	router.RedirectTrailingSlash = false
 	_ = router.SetTrustedProxies(nil)
 
-	// CORS 中间件：允许 Cloudflare Pages 等前端域名跨域调用
+	// CORS middleware
+	// /api/v1/* goes through One API which adds its own CORS;
+	// we only handle OPTIONS preflight for those routes.
 	router.Use(func(c *gin.Context) {
-		c.Header("Access-Control-Allow-Origin", "*")
-		c.Header("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS")
-		c.Header("Access-Control-Allow-Headers", "Authorization,Content-Type,access-token,x-webdav-target,x-webdav-method,x-webdav-authorization,x-webdav-depth,x-webdav-destination,x-webdav-overwrite,x-webdav-content-type")
-		c.Header("Access-Control-Expose-Headers", "Content-Type,ETag,Last-Modified,DAV")
+		isV1 := strings.HasPrefix(c.Request.URL.Path, "/api/v1/")
+		setCORS := func() {
+			origin := c.GetHeader("Origin")
+			if origin == "" {
+				origin = "*"
+			}
+			c.Header("Access-Control-Allow-Origin", origin)
+			c.Header("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS")
+			c.Header("Access-Control-Allow-Headers", "Authorization,Content-Type,access-token,x-webdav-target,x-webdav-method,x-webdav-authorization,x-webdav-depth,x-webdav-destination,x-webdav-overwrite,x-webdav-content-type")
+			c.Header("Access-Control-Expose-Headers", "Content-Type,ETag,Last-Modified,DAV")
+		}
 		if c.Request.Method == "OPTIONS" {
+			setCORS()
 			c.AbortWithStatus(204)
 			return
 		}
+		if isV1 {
+			c.Next()
+			return
+		}
+		setCORS()
 		c.Next()
 	})
 
@@ -91,7 +107,7 @@ func New() *gin.Engine {
 		handler.AdminDeleteAsset(c.Writer, c.Request, c.Param("id"))
 	})
 
-	// WebDAV 代理：代替 Next.js BFF 转发 WebDAV 请求，绕过浏览器 CORS 限制
+	// WebDAV proxy
 	router.POST("/webdav-proxy", gin.WrapF(handler.WebDAVProxy))
 
 	router.NoRoute(middleware.NotFoundJSON)
