@@ -209,7 +209,14 @@ function InfiniteCanvasPage() {
     const { message } = App.useApp();
     const params = useParams<{ id: string }>();
     const router = useRouter();
-    const projectId = params.id;
+    // 静态导出兼容：占位 ID "_" 在 mount 后替换为真实 ID
+    const [projectId, setProjectId] = useState(params.id);
+    useEffect(() => {
+        const realId = window.location.pathname.replace(/^\/canvas\/?/, "").replace(/\/$/, "");
+        if (realId && realId !== "_") {
+            setProjectId(realId);
+        }
+    }, []);
     const containerRef = useRef<HTMLDivElement>(null);
     const imageInputRef = useRef<HTMLInputElement>(null);
     const uploadTargetRef = useRef<{ nodeId?: string; position?: Position } | null>(null);
@@ -330,8 +337,7 @@ function InfiniteCanvasPage() {
         setProjectLoaded(false);
         const project = openProject(projectId);
         if (!project) {
-            // 禁用重定向防止无限刷新
-            console.error("Project not found:", projectId);
+            router.replace("/canvas");
             return;
         }
 
