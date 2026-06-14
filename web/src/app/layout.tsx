@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { AntdRegistry } from "@ant-design/nextjs-registry";
 import { AppProviders } from "@/components/layout/app-providers";
 import "antd/dist/reset.css";
 import "./globals.css";
@@ -23,9 +22,7 @@ export default function RootLayout({
                     fontFamily: '"SF Pro Display","SF Pro Text","PingFang SC","Microsoft YaHei","Helvetica Neue",sans-serif',
                 }}
             >
-                <AntdRegistry>
-                    <AppProviders>{children}</AppProviders>
-                </AntdRegistry>
+                {children}
             </body>
         </html>
     );
