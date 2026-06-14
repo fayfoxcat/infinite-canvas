@@ -17,6 +17,7 @@ export default function nextConfig(phase: string): NextConfig {
         output: isDev ? undefined : "export",
         trailingSlash: true,
         allowedDevOrigins: isDev ? ["*.*.*.*"] : [],
+        reactStrictMode: false,
         typescript: {
             ignoreBuildErrors: true,
         },
