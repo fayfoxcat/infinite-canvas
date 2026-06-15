@@ -27,6 +27,7 @@
 - 无限画布：多画布项目、节点拖拽缩放、连线、小地图、撤销重做、导入导出。
 - AI 创作：支持 OpenAI 兼容接口的文生图、图生图、参考图编辑、文本问答和视频生成；Seedance 2.0 可通过火山方舟 Agent Plan 接入。
 - 画布助手：围绕选中节点和上游节点对话、生图，并把结果插回画布。
+- 本地 Agent：通过本机 Canvas Agent 连接 Codex / Claude Code，让 Agent 通过 MCP 操作当前画布。
 - 提示词库：抓取多个 GitHub 开源项目，按案例整理数百个图片提示词。
 
 完整功能说明见 [docs/features.md](docs2/features.md)。
@@ -67,11 +68,11 @@ docker compose -f docker-compose.local.yml up -d --build
 如果使用 New API，可在 `系统设置 -> 聊天方式 -> 添加聊天设置` 中填入：
 
 ```text
-https://infinite-canvas-cpco.onrender.com?apiKey={key}&baseUrl={address}
+https://canvas.best?apiKey={key}&baseUrl={address}
 ```
 
 跳转后会自动打开配置弹窗并填入 API Key 和 Base URL。
-如果自己部署了，可以把 `https://infinite-canvas-cpco.onrender.com` 替换成你部署的地址。
+如果自己部署了，可以把 `https://canvas.best` 替换成你部署的地址。
 
 ## 效果展示
 
@@ -100,6 +101,7 @@ https://infinite-canvas-cpco.onrender.com?apiKey={key}&baseUrl={address}
 - [后端数据库说明](docs2/backend-database.md)
 - [系统配置数据结构](docs2/system-settings.md)
 - [接口响应约定](docs2/api-response.md)
+- [本地 Canvas Agent](canvas-agent/README.md)
 
 ## 赞助支持
 

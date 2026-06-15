@@ -92,12 +92,12 @@ export type CanvasAssistantImage = {
 
 export type CanvasAssistantMessage = {
     id: string;
-    role: "user" | "assistant";
-    mode: "ask" | "image";
+    role: "user" | "assistant" | "system" | "tool" | "error";
+    title?: string;
     text: string;
-    isLoading?: boolean;
+    meta?: string;
+    detail?: unknown;
     references?: CanvasAssistantReference[];
-    images?: CanvasAssistantImage[];
 };
 
 export type CanvasAssistantSession = {
