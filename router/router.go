@@ -15,31 +15,41 @@ func New() *gin.Engine {
 	_ = router.SetTrustedProxies(nil)
 
 	// CORS middleware
-	// /api/v1/* goes through One API which adds its own CORS;
-	// we only handle OPTIONS preflight for those routes.
 	router.Use(func(c *gin.Context) {
-		isV1 := strings.HasPrefix(c.Request.URL.Path, "/api/v1/")
-		setCORS := func() {
-			origin := c.GetHeader("Origin")
-			if origin == "" {
-				origin = "*"
-			}
+		origin := c.GetHeader("Origin")
+		if origin == "" {
+			origin = "*"
+		}
+
+		// Handle OPTIONS preflight
+		if c.Request.Method == "OPTIONS" {
 			c.Header("Access-Control-Allow-Origin", origin)
 			c.Header("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS")
 			c.Header("Access-Control-Allow-Headers", "Authorization,Content-Type,access-token,x-webdav-target,x-webdav-method,x-webdav-authorization,x-webdav-depth,x-webdav-destination,x-webdav-overwrite,x-webdav-content-type")
 			c.Header("Access-Control-Expose-Headers", "Content-Type,ETag,Last-Modified,DAV")
-		}
-		if c.Request.Method == "OPTIONS" {
-			setCORS()
 			c.AbortWithStatus(204)
 			return
 		}
-		if isV1 {
-			c.Next()
-			return
-		}
-		setCORS()
+
+		// Set CORS headers before request processing
+		// This ensures headers are present even if upstream One API fails to add them
+		c.Header("Access-Control-Allow-Origin", origin)
+		c.Header("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS")
+		c.Header("Access-Control-Expose-Headers", "Content-Type,ETag,Last-Modified,DAV")
+
 		c.Next()
+
+		// For /api/v1/* routes, check if upstream added duplicate CORS headers
+		// If One API already set Access-Control-Allow-Origin, remove our fallback to avoid duplicates
+		if strings.HasPrefix(c.Request.URL.Path, "/api/v1/") {
+			headers := c.Writer.Header()
+			allowOriginValues := headers.Values("Access-Control-Allow-Origin")
+			if len(allowOriginValues) > 1 {
+				// Multiple values detected, keep only the last one (from One API)
+				headers.Del("Access-Control-Allow-Origin")
+				headers.Set("Access-Control-Allow-Origin", allowOriginValues[len(allowOriginValues)-1])
+			}
+		}
 	})
 
 	api := router.Group("/api")

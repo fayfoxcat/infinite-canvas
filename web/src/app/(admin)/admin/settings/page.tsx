@@ -528,7 +528,7 @@ export default function AdminSettingsPage() {
                                             </Col>
                                             <Col xs={24} md={9}>
                                                 <Form.Item name={["private", "auth", "linuxDo", "clientSecret"]} label="Linux.do Client Secret">
-                                                    <Input.Password placeholder="留空则沿用已保存的密钥" />
+                                                    <Input.Password placeholder="留空则沿用已保存的密钥" autoComplete="off" />
                                                 </Form.Item>
                                             </Col>
                                         </Row>
@@ -657,7 +657,7 @@ export default function AdminSettingsPage() {
                             </Col>
                             <Col span={24}>
                                 <Form.Item name="apiKey" label="API Key" rules={editingChannelIndex === null ? [{ required: true, message: "请输入 API Key" }] : []}>
-                                    <Input.Password placeholder={editingChannelIndex === null ? "" : "留空则沿用已保存的 API Key"} />
+                                    <Input.Password placeholder={editingChannelIndex === null ? "" : "留空则沿用已保存的 API Key"} autoComplete="off" />
                                 </Form.Item>
                             </Col>
                             <Col span={24}>
