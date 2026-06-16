@@ -10,6 +10,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/basketikun/infinite-canvas/service"
 )
@@ -110,8 +111,10 @@ func proxyAIRequest(w http.ResponseWriter, r *http.Request, path string) {
 	})
 }
 
+var aiProxyClient = &http.Client{Timeout: 5 * time.Minute}
+
 func copyAIResponse(w http.ResponseWriter, request *http.Request, onFailure func()) {
-	response, err := http.DefaultClient.Do(request)
+	response, err := aiProxyClient.Do(request)
 	if err != nil {
 		log.Printf("AI proxy request failed: url=%s err=%v", request.URL.String(), err)
 		if onFailure != nil {

@@ -14,40 +14,31 @@ func New() *gin.Engine {
 	router.RedirectTrailingSlash = false
 	_ = router.SetTrustedProxies(nil)
 
-	// CORS middleware
+	// CORS middleware - set full headers on every response
 	router.Use(func(c *gin.Context) {
 		origin := c.GetHeader("Origin")
 		if origin == "" {
 			origin = "*"
 		}
+		c.Header("Access-Control-Allow-Origin", origin)
+		c.Header("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS")
+		c.Header("Access-Control-Allow-Headers", "Authorization,Content-Type,access-token,x-webdav-target,x-webdav-method,x-webdav-authorization,x-webdav-depth,x-webdav-destination,x-webdav-overwrite,x-webdav-content-type")
+		c.Header("Access-Control-Expose-Headers", "Content-Type,ETag,Last-Modified,DAV")
 
-		// Handle OPTIONS preflight
 		if c.Request.Method == "OPTIONS" {
-			c.Header("Access-Control-Allow-Origin", origin)
-			c.Header("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS")
-			c.Header("Access-Control-Allow-Headers", "Authorization,Content-Type,access-token,x-webdav-target,x-webdav-method,x-webdav-authorization,x-webdav-depth,x-webdav-destination,x-webdav-overwrite,x-webdav-content-type")
-			c.Header("Access-Control-Expose-Headers", "Content-Type,ETag,Last-Modified,DAV")
 			c.AbortWithStatus(204)
 			return
 		}
 
-		// Set CORS headers before request processing
-		// This ensures headers are present even if upstream One API fails to add them
-		c.Header("Access-Control-Allow-Origin", origin)
-		c.Header("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS")
-		c.Header("Access-Control-Expose-Headers", "Content-Type,ETag,Last-Modified,DAV")
-
 		c.Next()
 
-		// For /api/v1/* routes, check if upstream added duplicate CORS headers
-		// If One API already set Access-Control-Allow-Origin, remove our fallback to avoid duplicates
+		// /api/v1/* goes through One API which adds its own Access-Control-Allow-Origin.
+		// If duplicate detected, keep only One API's value.
 		if strings.HasPrefix(c.Request.URL.Path, "/api/v1/") {
-			headers := c.Writer.Header()
-			allowOriginValues := headers.Values("Access-Control-Allow-Origin")
-			if len(allowOriginValues) > 1 {
-				// Multiple values detected, keep only the last one (from One API)
-				headers.Del("Access-Control-Allow-Origin")
-				headers.Set("Access-Control-Allow-Origin", allowOriginValues[len(allowOriginValues)-1])
+			vals := c.Writer.Header().Values("Access-Control-Allow-Origin")
+			if len(vals) > 1 {
+				c.Writer.Header().Del("Access-Control-Allow-Origin")
+				c.Writer.Header().Set("Access-Control-Allow-Origin", vals[len(vals)-1])
 			}
 		}
 	})
