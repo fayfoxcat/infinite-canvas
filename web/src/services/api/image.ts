@@ -22,6 +22,14 @@ type ImageApiResponse = {
     msg?: string;
 };
 
+// 异步图片任务：提交后返回 taskId，前端轮询 /images/tasks/:id 直到完成。
+type ImageTaskCreateResponse = { taskId?: string; code?: number; data?: { taskId?: string } | null; msg?: string };
+type ImageTaskStatePayload = { status: "pending" } | { status: "completed"; payload: ImageApiResponse } | { status: "failed"; error?: string };
+type ImageTaskStateResponse = ImageTaskStatePayload | { code?: number; data?: ImageTaskStatePayload | null; msg?: string };
+
+const IMAGE_TASK_POLL_INTERVAL_MS = 2500;
+const IMAGE_TASK_MAX_POLLS = 120;
+
 const QUALITY_BASE: Record<string, number> = {
     low: 1024,
     medium: 2048,
@@ -200,22 +208,26 @@ export async function requestGeneration(config: AiConfig, prompt: string) {
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
     const quality = normalizeQuality(config.quality);
     const requestSize = resolveRequestSize(quality, config.size);
-    try {
-        const response = await axios.post<ImageApiResponse>(
-            aiApiUrl(config, "/images/generations"),
-            {
-                model: config.model,
-                prompt: withSystemPrompt(config, prompt),
-                n,
-                ...(quality ? { quality } : {}),
-                ...(requestSize ? { size: requestSize } : {}),
-                response_format: "b64_json",
-                output_format: IMAGE_OUTPUT_FORMAT,
-            },
-            {
-                headers: aiHeaders(config, "application/json"),
-            },
+    const requestBody = {
+        model: config.model,
+        prompt: withSystemPrompt(config, prompt),
+        n,
+        ...(quality ? { quality } : {}),
+        ...(requestSize ? { size: requestSize } : {}),
+        response_format: "b64_json",
+        output_format: IMAGE_OUTPUT_FORMAT,
+    };
+    // remote 模式走异步任务轮询，绕过 Cloudflare 100s 超时；local 直连保持同步。
+    if (config.channelMode === "remote") {
+        const payload = await runImageTask(config, () =>
+            axios.post<ImageTaskCreateResponse>(`${API_BASE}/api/v1/images/generations/async`, requestBody, { headers: aiHeaders(config, "application/json") }),
         );
+        const images = parseImagePayload(payload);
+        refreshRemoteUser(config);
+        return images;
+    }
+    try {
+        const response = await axios.post<ImageApiResponse>(aiApiUrl(config, "/images/generations"), requestBody, { headers: aiHeaders(config, "application/json") });
         const images = parseImagePayload(response.data);
         refreshRemoteUser(config);
         return images;
@@ -245,6 +257,15 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     files.forEach((file) => formData.append("image", file));
     if (mask) formData.set("mask", dataUrlToFile(mask));
 
+    // remote 模式走异步任务轮询；local 直连保持同步。
+    if (config.channelMode === "remote") {
+        const payload = await runImageTask(config, () =>
+            axios.post<ImageTaskCreateResponse>(`${API_BASE}/api/v1/images/edits/async`, formData, { headers: aiHeaders(config) }),
+        );
+        const images = parseImagePayload(payload);
+        refreshRemoteUser(config);
+        return images;
+    }
     try {
         const response = await axios.post<ImageApiResponse>(aiApiUrl(config, "/images/edits"), formData, { headers: aiHeaders(config) });
         const images = parseImagePayload(response.data);
@@ -253,6 +274,46 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     } catch (error) {
         throw new Error(readAxiosError(error, "请求失败"));
     }
+}
+
+// runImageTask 提交异步图片任务并轮询直到完成，返回上游原始图片响应。
+async function runImageTask(config: AiConfig, submit: () => Promise<{ data: ImageTaskCreateResponse }>): Promise<ImageApiResponse> {
+    let created: ImageTaskCreateResponse;
+    try {
+        created = (await submit()).data;
+    } catch (error) {
+        throw new Error(readAxiosError(error, "请求失败"));
+    }
+    const taskId = created.taskId || created.data?.taskId;
+    if (!taskId) {
+        if (typeof created.code === "number" && created.code !== 0) throw new Error(created.msg || "请求失败");
+        throw new Error("图片任务创建失败");
+    }
+    for (let attempt = 0; attempt < IMAGE_TASK_MAX_POLLS; attempt += 1) {
+        await delay(IMAGE_TASK_POLL_INTERVAL_MS);
+        let state: ImageTaskStatePayload;
+        try {
+            state = unwrapImageTaskState((await axios.get<ImageTaskStateResponse>(`${API_BASE}/api/v1/images/tasks/${encodeURIComponent(taskId)}`, { headers: aiHeaders(config) })).data);
+        } catch (error) {
+            throw new Error(readAxiosError(error, "图片任务查询失败"));
+        }
+        if (state.status === "completed") return state.payload;
+        if (state.status === "failed") throw new Error(state.error || "图片生成失败");
+    }
+    throw new Error("图片生成超时，请稍后重试");
+}
+
+function unwrapImageTaskState(payload: ImageTaskStateResponse): ImageTaskStatePayload {
+    if (payload && typeof payload === "object" && "code" in payload && typeof payload.code === "number") {
+        if (payload.code !== 0) throw new Error(payload.msg || "图片任务查询失败");
+        if (!payload.data) throw new Error("图片任务查询失败");
+        return payload.data;
+    }
+    return payload as ImageTaskStatePayload;
+}
+
+function delay(ms: number) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export async function requestImageQuestion(config: AiConfig, messages: ChatCompletionMessage[], onDelta: (text: string) => void) {

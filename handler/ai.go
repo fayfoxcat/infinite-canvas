@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -21,6 +22,127 @@ func AIImagesGenerations(w http.ResponseWriter, r *http.Request) {
 
 func AIImagesEdits(w http.ResponseWriter, r *http.Request) {
 	proxyAIRequest(w, r, "/images/edits")
+}
+
+// AIImagesGenerationsAsync 提交异步文生图任务，立即返回任务 ID。
+// 用于绕过 Cloudflare 100 秒请求超时：前端改为轮询 /images/tasks/:id。
+func AIImagesGenerationsAsync(w http.ResponseWriter, r *http.Request) {
+	submitAIImageTask(w, r, "/images/generations")
+}
+
+// AIImagesEditsAsync 提交异步改图任务（multipart），立即返回任务 ID。
+func AIImagesEditsAsync(w http.ResponseWriter, r *http.Request) {
+	submitAIImageTask(w, r, "/images/edits")
+}
+
+// AIImageTask 查询异步图片任务状态。completed/failed 时一次性领取并删除。
+func AIImageTask(w http.ResponseWriter, r *http.Request, id string) {
+	task, ok := service.TakeImageTask(id)
+	if !ok {
+		// 容错：轮询可能早于任务建立，或任务已被领取，统一按 pending 处理一次
+		OK(w, map[string]any{"status": service.ImageTaskStatusPending})
+		return
+	}
+	switch task.Status {
+	case service.ImageTaskStatusCompleted:
+		var payload any
+		if err := json.Unmarshal(task.Body, &payload); err != nil {
+			OK(w, map[string]any{"status": service.ImageTaskStatusFailed, "error": "图片任务响应解析失败"})
+			return
+		}
+		OK(w, map[string]any{"status": service.ImageTaskStatusCompleted, "payload": payload})
+	case service.ImageTaskStatusFailed:
+		OK(w, map[string]any{"status": service.ImageTaskStatusFailed, "error": task.Error})
+	default:
+		OK(w, map[string]any{"status": service.ImageTaskStatusPending})
+	}
+}
+
+// submitAIImageTask 扣费、建任务、起后台 goroutine 调用上游，立即返回任务 ID。
+func submitAIImageTask(w http.ResponseWriter, r *http.Request, path string) {
+	body, contentType, modelName, err := readAIRequest(r)
+	if err != nil {
+		log.Printf("AI async request read failed: %v", err)
+		Fail(w, "AI 接口请求失败")
+		return
+	}
+	user, ok := service.UserFromContext(r.Context())
+	if !ok {
+		Fail(w, "未登录或权限不足")
+		return
+	}
+	credits, err := service.ModelCost(modelName)
+	if err != nil {
+		log.Printf("AI async read model cost failed: model=%s err=%v", modelName, err)
+		Fail(w, "AI 接口请求失败")
+		return
+	}
+	credits *= readAIRequestCount(body, contentType)
+	channel, err := service.SelectModelChannel(modelName)
+	if err != nil {
+		log.Printf("AI async select channel failed: model=%s err=%v", modelName, err)
+		Fail(w, "AI 接口请求失败")
+		return
+	}
+	upstreamPath := resolveAIProxyPath(channel.BaseURL, modelName, path)
+	upstreamURL := service.BuildModelChannelURL(channel, upstreamPath)
+
+	if err := service.ConsumeUserCredits(user.ID, modelName, credits, upstreamPath); err != nil {
+		FailError(w, err)
+		return
+	}
+
+	taskID := service.CreateImageTask()
+	OK(w, map[string]any{"taskId": taskID})
+
+	refund := func() {
+		if err := service.RefundUserCredits(user.ID, modelName, credits, upstreamPath); err != nil {
+			log.Printf("AI async refund credits failed: user=%s model=%s credits=%d err=%v", user.ID, modelName, credits, err)
+		}
+	}
+
+	go runAIImageTask(taskID, upstreamURL, channel.APIKey, contentType, body, refund)
+}
+
+// runAIImageTask 在后台调用上游图片接口，结果写入任务存储，失败则退费。
+func runAIImageTask(taskID string, upstreamURL string, apiKey string, contentType string, body []byte, refund func()) {
+	request, err := http.NewRequestWithContext(context.Background(), http.MethodPost, upstreamURL, bytes.NewReader(body))
+	if err != nil {
+		log.Printf("AI async build request failed: url=%s err=%v", upstreamURL, err)
+		service.FailImageTask(taskID, "AI 接口请求失败")
+		refund()
+		return
+	}
+	request.Header.Set("Authorization", "Bearer "+apiKey)
+	if contentType != "" {
+		request.Header.Set("Content-Type", contentType)
+	}
+
+	response, err := aiProxyClient.Do(request)
+	if err != nil {
+		log.Printf("AI async upstream failed: url=%s err=%v", upstreamURL, err)
+		service.FailImageTask(taskID, "AI 接口请求失败")
+		refund()
+		return
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode >= http.StatusBadRequest {
+		errBody, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
+		log.Printf("AI async upstream error: url=%s status=%d", upstreamURL, response.StatusCode)
+		service.FailImageTask(taskID, aiUpstreamStatusMessage(response.StatusCode, errBody))
+		refund()
+		return
+	}
+
+	result, err := io.ReadAll(response.Body)
+	if err != nil {
+		log.Printf("AI async read response failed: url=%s err=%v", upstreamURL, err)
+		service.FailImageTask(taskID, "AI 接口响应读取失败")
+		refund()
+		return
+	}
+	service.CompleteImageTask(taskID, result)
 }
 
 func AIChatCompletions(w http.ResponseWriter, r *http.Request) {

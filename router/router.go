@@ -62,6 +62,12 @@ func New() *gin.Engine {
 	v1 := api.Group("/v1", middleware.UserAuth)
 	v1.POST("/images/generations", gin.WrapF(handler.AIImagesGenerations))
 	v1.POST("/images/edits", gin.WrapF(handler.AIImagesEdits))
+	// 异步图片生成：绕过 Cloudflare 100s 超时，提交后轮询任务状态
+	v1.POST("/images/generations/async", gin.WrapF(handler.AIImagesGenerationsAsync))
+	v1.POST("/images/edits/async", gin.WrapF(handler.AIImagesEditsAsync))
+	v1.GET("/images/tasks/:id", func(c *gin.Context) {
+		handler.AIImageTask(c.Writer, c.Request, c.Param("id"))
+	})
 	v1.POST("/chat/completions", gin.WrapF(handler.AIChatCompletions))
 	v1.POST("/audio/speech", gin.WrapF(handler.AIAudioSpeech))
 	v1.POST("/videos", gin.WrapF(handler.AIVideos))
