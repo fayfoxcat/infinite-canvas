@@ -129,7 +129,7 @@ func runAIImageTask(taskID string, upstreamURL string, apiKey string, contentTyp
 
 	if response.StatusCode >= http.StatusBadRequest {
 		errBody, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
-		log.Printf("AI async upstream error: url=%s status=%d", upstreamURL, response.StatusCode)
+		log.Printf("AI async upstream error: url=%s status=%d body=%s", upstreamURL, response.StatusCode, strings.TrimSpace(string(errBody)))
 		service.FailImageTask(taskID, aiUpstreamStatusMessage(response.StatusCode, errBody))
 		refund()
 		return
