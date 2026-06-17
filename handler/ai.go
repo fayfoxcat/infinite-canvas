@@ -233,7 +233,7 @@ func proxyAIRequest(w http.ResponseWriter, r *http.Request, path string) {
 	})
 }
 
-var aiProxyClient = &http.Client{Timeout: 10 * time.Minute}
+var aiProxyClient = &http.Client{Timeout: 3 * time.Minute}
 
 func copyAIResponse(w http.ResponseWriter, request *http.Request, onFailure func()) {
 	response, err := aiProxyClient.Do(request)
