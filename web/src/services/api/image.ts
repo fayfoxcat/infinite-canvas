@@ -28,7 +28,7 @@ type ImageTaskStatePayload = { status: "pending" } | { status: "completed"; payl
 type ImageTaskStateResponse = ImageTaskStatePayload | { code?: number; data?: ImageTaskStatePayload | null; msg?: string };
 
 const IMAGE_TASK_POLL_INTERVAL_MS = 2500;
-const IMAGE_TASK_MAX_POLLS = 120;
+const IMAGE_TASK_MAX_POLLS = 240;
 
 const QUALITY_BASE: Record<string, number> = {
     low: 1024,
