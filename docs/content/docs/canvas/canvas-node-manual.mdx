@@ -53,8 +53,8 @@ description: 当前画布节点的主要用途与操作流程
 - 生成配置节点的视频模式会读取上游文本作为 prompt，读取上游图片作为参考图，读取上游视频作为参考视频，并在输入预览里显示参考视频。
 - 视频生成接口支持 OpenAI 风格的 `POST /v1/videos`、`GET /v1/videos/{id}` 和 `GET /v1/videos/{id}/content`。
 - 使用火山方舟 Agent Plan / Seedance 2.0 时，Base URL 配置为 `https://ark.cn-beijing.volces.com/api/plan/v3`，模型名使用 Seedance 2.0 对应模型；系统会改用 `POST /contents/generations/tasks` 创建异步任务，并轮询 `GET /contents/generations/tasks/{id}`。
-- Agent Plan 专属 `/api/plan/v3` 当前未提供 OpenAI `/models` 模型列表接口，后台不会伪造模型列表；请手动填写 `doubao-seedance-2.0` 或文档列出的其他可用模型。
-- Seedance 参考视频必须是公网可访问 URL，或由本项目后端在配置 `PUBLIC_BASE_URL` 后上传并暴露的参考素材 URL。本地/内网地址无法被火山服务器拉取。
+- Agent Plan 专属 `/api/plan/v3` 当前未提供 OpenAI `/models` 模型列表接口，配置弹窗不会伪造模型列表；请手动填写 `doubao-seedance-2.0` 或文档列出的其他可用模型。
+- Seedance 参考视频更建议使用公网可访问 URL；本地素材由前端读取后传给兼容接口，是否可用取决于具体上游。
 
 ### 推荐流程
 

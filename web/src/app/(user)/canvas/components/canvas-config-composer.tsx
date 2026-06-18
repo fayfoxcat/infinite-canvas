@@ -183,6 +183,12 @@ export function CanvasConfigComposer({ value, inputs, onChange, onClose }: Canva
 
 function MentionMenu({ inputs, allInputs, activeIndex, theme, onSelect }: { inputs: NodeGenerationInput[]; allInputs: NodeGenerationInput[]; activeIndex: number; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onSelect: (input: NodeGenerationInput) => void }) {
     const selectedRef = useRef(false);
+    const activeItemRef = useRef<HTMLButtonElement | null>(null);
+
+    useEffect(() => {
+        activeItemRef.current?.scrollIntoView({ block: "nearest" });
+    }, [activeIndex, inputs]);
+
     const selectInput = (input: NodeGenerationInput) => {
         if (selectedRef.current) return;
         selectedRef.current = true;
@@ -194,6 +200,7 @@ function MentionMenu({ inputs, allInputs, activeIndex, theme, onSelect }: { inpu
             {inputs.map((input, index) => (
                 <button
                     key={input.nodeId}
+                    ref={index === activeIndex ? activeItemRef : undefined}
                     type="button"
                     className="flex w-full min-w-0 items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition"
                     style={{ background: index === activeIndex ? theme.toolbar.activeBg : "transparent", color: index === activeIndex ? theme.toolbar.activeText : theme.node.text }}

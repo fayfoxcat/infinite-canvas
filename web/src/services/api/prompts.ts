@@ -1,4 +1,4 @@
-import { apiGet, compactApiParams } from "@/services/api/request";
+import { compactApiParams, serializeApiParams } from "@/services/api/request";
 
 export type Prompt = {
     id: string;
@@ -23,8 +23,7 @@ export type PromptListResponse = {
 };
 
 export async function fetchPrompts({ keyword = "", tag = [], category = ALL_PROMPTS_OPTION, page, pageSize }: { keyword?: string; tag?: string[]; category?: string; page?: number; pageSize?: number } = {}) {
-    return apiGet<PromptListResponse>(
-        "/api/prompts",
+    const params = serializeApiParams(
         compactApiParams({
             ...(keyword ? { keyword } : {}),
             ...(tag.length ? { tag } : {}),
@@ -33,6 +32,9 @@ export async function fetchPrompts({ keyword = "", tag = [], category = ALL_PROM
             ...(pageSize ? { pageSize } : {}),
         }),
     );
+    const response = await fetch(`/api/prompts${params.size ? `?${params}` : ""}`);
+    if (!response.ok) throw new Error("获取提示词失败");
+    return (await response.json()) as PromptListResponse;
 }
 
 export function formatPromptDate(value: string) {

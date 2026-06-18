@@ -10,9 +10,8 @@
   <a href="https://github.com/basketikun/infinite-canvas"><img src="https://img.shields.io/github/stars/basketikun/infinite-canvas?style=flat-square&logo=github" alt="GitHub stars"></a>
   <a href="VERSION"><img src="https://img.shields.io/badge/version-v0.2.0-2563eb?style=flat-square" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-f97316?style=flat-square" alt="License"></a>
-  <a href="https://www.docker.com/"><img src="https://img.shields.io/badge/Docker-ready-2496ed?style=flat-square&logo=docker&logoColor=white" alt="Docker ready"></a>
+  <a href="https://vercel.com/"><img src="https://img.shields.io/badge/Vercel-ready-000000?style=flat-square&logo=vercel" alt="Vercel ready"></a>
   <a href="https://nextjs.org/"><img src="https://img.shields.io/badge/Next.js-16.2-000000?style=flat-square&logo=nextdotjs" alt="Next.js"></a>
-  <a href="https://go.dev/"><img src="https://img.shields.io/badge/Go-1.25-00add8?style=flat-square&logo=go&logoColor=white" alt="Go"></a>
 </p>
 
 无限画布是一款面向图片创作的开源工作台。它把画布编排、AI 图片生成、参考图编辑、对话助手、提示词库和素材沉淀放在同一个界面里，适合用来探索视觉方案并连续迭代图片结果。
@@ -25,43 +24,43 @@
 ## 核心功能
 
 - 无限画布：多画布项目、节点拖拽缩放、连线、小地图、撤销重做、导入导出。
-- AI 创作：支持 OpenAI 兼容接口的文生图、图生图、参考图编辑、文本问答和视频生成；Seedance 2.0 可通过火山方舟 Agent Plan 接入。
+- AI 创作：浏览器前台直连你配置的 OpenAI 兼容接口，支持文生图、图生图、参考图编辑、文本问答、音频和视频生成；Seedance 2.0 可通过火山方舟 Agent Plan 接入。
 - 画布助手：围绕选中节点和上游节点对话、生图，并把结果插回画布。
 - 本地 Agent：通过本机 Canvas Agent 连接 Codex / Claude Code，让 Agent 通过 MCP 操作当前画布。
-- 提示词库：抓取多个 GitHub 开源项目，按案例整理数百个图片提示词。
+- 提示词库：Next.js route 抓取多个 GitHub 开源项目，并缓存在运行实例内存中。
 
-完整功能说明见 [docs/features.md](docs2/features.md)。
+完整功能说明见 [功能介绍](docs/content/docs/overview/features.mdx)。
 
 如果你在为担心没有合适的生图API来发愁，可以查看该免费生图项目：[chatgpt2api](https://github.com/basketikun/chatgpt2api)
 
 ## 技术栈
 
 - 前端：Next.js、React、TypeScript、Tailwind CSS、Ant Design、Zustand、TanStack Query。
-- 后端：Go、Gin、GORM。
-- 部署：Docker。
+- 少量 Next.js Route：第三方提示词内存缓存、WebDAV 可选代理。
+- 部署：Vercel 或 Docker。
 
 ## 快速开始
 
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/basketikun/infinite-canvas)
+推荐直接导入仓库到 Vercel，根目录已提供 `vercel.json`，会构建 `web/`。AI API Key、Base URL、画布、素材和生成记录默认保存在浏览器本地。
 
 ```bash
 git clone git@github.com:basketikun/infinite-canvas.git
 cd infinite-canvas
-cp .env.example .env
-# 修改默认账号密码等信息
-docker-compose up -d
+cd web
+bun install
+bun run dev
 ```
 
-本地源码构建运行：
+Docker 运行：
 
 ```bash
-cp .env.example .env
-docker compose -f docker-compose.local.yml up -d --build
+docker build -t infinite-canvas .
+docker run --rm -p 3000:3000 infinite-canvas
 ```
 
 运行后默认端口3000，可访问 `http://localhost:3000`。
 
-如需要拉取提示词，可前往:`http://localhost:3000/admin/prompts`
+首次打开后进入右上角配置，填入自己的 OpenAI 兼容 `Base URL` 和 `API Key`。
 
 ## New API 自动配置
 
@@ -89,18 +88,23 @@ https://canvas.best?apiKey={key}&baseUrl={address}
     <td width="50%"><img src="https://i.ibb.co/bj30FtS5/5.png" alt="5" border="0"></td>
     <td width="50%"><img src="https://i.ibb.co/hxRvjw51/image.png" alt="image" border="0"></td>
   </tr>
+  <tr>
+    <td width="50%"><img src="https://i.ibb.co/jkWsF8q1/image.png" alt="image" border="0"></td>
+    <td width="50%"><img src="https://i.ibb.co/XrnfXHx7/image.png" alt="image" border="0"></td>
+  </tr>
 </table>
 
 ## 文档
 
-- [功能介绍](docs2/features.md)
-- [部署说明](docs2/deployment.md)
-- [画布节点操作手册](docs2/canvas-node-manual.md)
-- [画布快捷键](docs2/canvas-shortcuts.md)
-- [待办事项](docs2/todo.md)
-- [后端数据库说明](docs2/backend-database.md)
-- [系统配置数据结构](docs2/system-settings.md)
-- [接口响应约定](docs2/api-response.md)
+- [快速开始](docs/content/docs/overview/quick-start.mdx)
+- [功能介绍](docs/content/docs/overview/features.mdx)
+- [Render 部署](docs/content/docs/overview/render.mdx)
+- [Docker 部署](docs/content/docs/overview/docker.mdx)
+- [画布节点操作手册](docs/content/docs/canvas/canvas-node-manual.mdx)
+- [画布快捷键](docs/content/docs/canvas/canvas-shortcuts.mdx)
+- [贡献者协议](CLA.md)
+- [漏洞提交](SECURITY.md)
+- [待办事项](docs/content/docs/progress/todo.mdx)
 - [本地 Canvas Agent](canvas-agent/README.md)
 
 ## 赞助支持

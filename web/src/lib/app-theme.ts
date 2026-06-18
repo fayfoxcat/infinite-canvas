@@ -1,4 +1,3 @@
-import type { CSSProperties } from "react";
 import type { ThemeConfig } from "antd";
 import { theme as antdTheme } from "antd";
 
@@ -27,14 +26,6 @@ const neutral = {
         tableSelectedBg: "rgba(255, 255, 255, 0.08)",
         tableSelectedHoverBg: "rgba(255, 255, 255, 0.12)",
     },
-};
-
-export const adminLayoutStyle = {
-    siderWidth: 232,
-    headerHeight: 56,
-    brandHeight: 64,
-    menu: { borderInlineEnd: 0, padding: "18px 12px", fontSize: 15 } satisfies CSSProperties,
-    menuItem: { height: 44, lineHeight: "44px", marginBlock: 4, borderRadius: 8 } satisfies CSSProperties,
 };
 
 export function getAntThemeConfig(dark: boolean): ThemeConfig {
