@@ -142,6 +142,7 @@ func runAIImageTask(taskID string, upstreamURL string, apiKey string, contentTyp
 		refund()
 		return
 	}
+		log.Printf("AI async task completed: url=%s task=%s bytes=%d", upstreamURL, taskID, len(result))
 	service.CompleteImageTask(taskID, result)
 }
 
