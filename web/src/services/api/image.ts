@@ -244,7 +244,7 @@ async function requestGenerationSync(
 ) {
     try {
         const response = await axios.post<ImageApiResponse>(
-            aiApiUrl(config, "/images/generations?sync=1"),
+            aiApiUrl(config, "/images/generations"),
             {
                 model: config.model,
                 prompt: withSystemPrompt(config, prompt),
@@ -275,7 +275,7 @@ async function createImageTask(
 ) {
     try {
         const response = await axios.post<{ code: number; data: { id: string; status: string }; msg: string }>(
-            aiApiUrl(config, "/images/generations"),
+            aiApiUrl(config, "/images/generations?async=1"),
             {
                 model: config.model,
                 prompt: withSystemPrompt(config, prompt),

@@ -16,11 +16,11 @@ import (
 )
 
 func AIImagesGenerations(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Query().Get("sync") == "1" {
-		proxyAIRequest(w, r, "/images/generations")
+	if r.URL.Query().Get("async") == "1" {
+		asyncImageGeneration(w, r)
 		return
 	}
-	asyncImageGeneration(w, r)
+	proxyAIRequest(w, r, "/images/generations")
 }
 
 func AIImagesEdits(w http.ResponseWriter, r *http.Request) {
