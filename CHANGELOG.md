@@ -3,6 +3,7 @@
 ## Unreleased
 
 + [新增] 渠道兼容Gemini格式。
++ [新增] 新增Codex App插件支持。
 
 ## v0.4.0 - 2026-06-16
 
