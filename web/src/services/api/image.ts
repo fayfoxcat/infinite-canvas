@@ -81,7 +81,7 @@ type ImageTaskStatePayload = { status: "pending" } | { status: "completed"; payl
 type ImageTaskStateResponse = ImageTaskStatePayload | { code?: number; data?: ImageTaskStatePayload | null; msg?: string };
 
 const IMAGE_TASK_POLL_INTERVAL_MS = 2500;
-const IMAGE_TASK_MAX_POLLS = 72;
+const IMAGE_TASK_MAX_POLLS = 120;
 type GeminiPart = {
     text?: string;
     inlineData?: { mimeType?: string; data?: string };
