@@ -21,7 +21,7 @@ type ModelPickerProps = {
 export function ModelPicker({ config, value, onChange, capability, className, fullWidth = false, placeholder = "选择模型", onMissingConfig }: ModelPickerProps) {
     const pickerId = useId();
     const [open, setOpen] = useState(false);
-    const options = useMemo(() => Array.from(new Set([...(config.channelMode === "local" && !capability ? [value] : []), ...selectableModelsByCapability(config, capability)].filter((model): model is string => Boolean(model)))), [capability, config, value]);
+    const options = useMemo(() => Array.from(new Set([value, ...selectableModelsByCapability(config, capability)].filter((model): model is string => Boolean(model)))), [capability, config, value]);
     const current = value || "";
 
     useEffect(() => {
@@ -45,9 +45,9 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
         >
             <SelectTrigger
                 className={cn(
-                    "canvas-composer-model-picker h-8 w-fit max-w-full gap-2 rounded-full border border-input bg-transparent px-3 text-sm font-normal shadow-sm transition-colors",
+                    "canvas-composer-model-picker h-8 w-fit max-w-full gap-2 rounded-xl border border-neutral-200 bg-white px-3 text-sm font-normal shadow-sm transition-colors hover:border-neutral-300 dark:border-neutral-800 dark:bg-neutral-950",
                     fullWidth ? "w-full min-w-0 justify-start" : "min-w-[9rem] justify-start",
-                    "data-[state=open]:border-ring data-[state=open]:ring-2 data-[state=open]:ring-ring/20",
+                    "data-[state=open]:border-emerald-500 data-[state=open]:ring-2 data-[state=open]:ring-emerald-500/15",
                     className,
                 )}
                 onMouseDown={(event) => event.stopPropagation()}
@@ -59,7 +59,7 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
             </SelectTrigger>
             <SelectContent
                 data-canvas-no-zoom
-                className="z-[1200] w-80 max-w-[calc(100vw-24px)] rounded-xl border border-border/70 bg-popover p-1 shadow-xl"
+                className="z-[1300] w-[260px] max-w-[calc(100vw-24px)] rounded-xl border border-neutral-200 bg-white p-1 shadow-[0_14px_36px_rgba(15,23,42,0.14)] dark:border-neutral-800 dark:bg-neutral-950"
                 position="popper"
                 align="start"
                 side="bottom"
@@ -69,12 +69,12 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
             >
                 {options.length ? (
                     options.map((model) => (
-                        <SelectItem key={model} value={model} textValue={modelOptionLabel(config, model)}>
+                        <SelectItem key={model} value={model} textValue={modelOptionLabel(config, model)} className="h-9 rounded-lg px-2.5 pr-8 text-sm hover:bg-neutral-100 data-[highlighted]:bg-neutral-100 data-[state=checked]:bg-neutral-100 dark:hover:bg-neutral-900 dark:data-[highlighted]:bg-neutral-900 dark:data-[state=checked]:bg-neutral-900">
                             <ModelLabel config={config} model={model} />
                         </SelectItem>
                     ))
                 ) : (
-                    <SelectItem value="__empty__" disabled>
+                    <SelectItem value="__empty__" disabled className="h-9 rounded-lg px-2.5 pr-8 text-sm">
                         {emptyModelLabel(config, capability)}
                     </SelectItem>
                 )}
