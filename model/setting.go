@@ -16,6 +16,7 @@ type ModelChannel struct {
 	BaseURL  string   `json:"baseUrl"`
 	APIKey   string   `json:"apiKey"`
 	Models   []string `json:"models"`
+	Type     string   `json:"type"` // "", "text", "image", "video", "audio"；空表示自动检测
 	Weight   int      `json:"weight"`
 	Enabled  bool     `json:"enabled"`
 	Remark   string   `json:"remark"`
@@ -35,6 +36,7 @@ type PublicModelChannelSetting struct {
 	DefaultImageModel  string      `json:"defaultImageModel"`
 	DefaultVideoModel  string      `json:"defaultVideoModel"`
 	DefaultTextModel   string      `json:"defaultTextModel"`
+	DefaultAudioModel  string      `json:"defaultAudioModel"`
 	SystemPrompt       string      `json:"systemPrompt"`
 	AllowCustomChannel *bool       `json:"allowCustomChannel"`
 }

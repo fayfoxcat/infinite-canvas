@@ -39,15 +39,16 @@ func New() *gin.Engine {
 
 		c.Next()
 
-		// For /api/v1/* routes, check if upstream added duplicate CORS headers
-		// If One API already set Access-Control-Allow-Origin, remove our fallback to avoid duplicates
+		// For /api/v1/* routes, the upstream (One API) copies its own CORS
+		// headers into the response. If a duplicate Access-Control-Allow-Origin
+		// is detected, keep only Go's specific origin (first value) — "*" from
+		// the upstream is invalid for credentialed requests with Authorization.
 		if strings.HasPrefix(c.Request.URL.Path, "/api/v1/") {
 			headers := c.Writer.Header()
 			allowOriginValues := headers.Values("Access-Control-Allow-Origin")
 			if len(allowOriginValues) > 1 {
-				// Multiple values detected, keep only the last one (from One API)
 				headers.Del("Access-Control-Allow-Origin")
-				headers.Set("Access-Control-Allow-Origin", allowOriginValues[len(allowOriginValues)-1])
+				headers.Set("Access-Control-Allow-Origin", allowOriginValues[0])
 			}
 		}
 	})
@@ -70,6 +71,12 @@ func New() *gin.Engine {
 	})
 	v1 := api.Group("/v1", middleware.UserAuth)
 	v1.POST("/images/generations", gin.WrapF(handler.AIImagesGenerations))
+		v1.GET("/images/generations/:id", func(c *gin.Context) {
+			handler.AIImageGenerationTask(c.Writer, c.Request, c.Param("id"))
+		})
+		v1.GET("/images/generations/:id/result", func(c *gin.Context) {
+			handler.AIImageGenerationResult(c.Writer, c.Request, c.Param("id"))
+		})
 	v1.POST("/images/edits", gin.WrapF(handler.AIImagesEdits))
 	v1.POST("/chat/completions", gin.WrapF(handler.AIChatCompletions))
 	v1.POST("/audio/speech", gin.WrapF(handler.AIAudioSpeech))

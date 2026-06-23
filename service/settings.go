@@ -99,9 +99,15 @@ func normalizePublicSettingWithChannels(setting model.PublicSetting, channels []
 	} else {
 		setting.ModelChannel.AvailableModels = uniqueModelNames(setting.ModelChannel.AvailableModels)
 	}
-	setting.ModelChannel.DefaultTextModel = repairDefaultModel(setting.ModelChannel.DefaultTextModel, setting.ModelChannel.AvailableModels, isTextModelName)
-	setting.ModelChannel.DefaultImageModel = repairDefaultModel(setting.ModelChannel.DefaultImageModel, setting.ModelChannel.AvailableModels, isImageModelName)
-	setting.ModelChannel.DefaultVideoModel = repairDefaultModel(setting.ModelChannel.DefaultVideoModel, setting.ModelChannel.AvailableModels, isVideoModelName)
+	imageModels := collectChannelModelsByCapability(channels, "image")
+	videoModels := collectChannelModelsByCapability(channels, "video")
+	textModels := collectChannelModelsByCapability(channels, "text")
+	audioModels := collectChannelModelsByCapability(channels, "audio")
+
+	setting.ModelChannel.DefaultImageModel = repairDefaultModel(setting.ModelChannel.DefaultImageModel, imageModels, nil)
+	setting.ModelChannel.DefaultVideoModel = repairDefaultModel(setting.ModelChannel.DefaultVideoModel, videoModels, nil)
+	setting.ModelChannel.DefaultTextModel = repairDefaultModel(setting.ModelChannel.DefaultTextModel, textModels, nil)
+	setting.ModelChannel.DefaultAudioModel = repairDefaultModel(setting.ModelChannel.DefaultAudioModel, audioModels, nil)
 	setting.ModelChannel.DefaultModel = repairDefaultModel(setting.ModelChannel.DefaultModel, setting.ModelChannel.AvailableModels, isTextModelName)
 	return setting
 }
@@ -134,6 +140,11 @@ func normalizePrivateSetting(setting model.PrivateSetting) model.PrivateSetting 
 		}
 		if setting.Channels[i].Weight <= 0 {
 			setting.Channels[i].Weight = 1
+		}
+		// 校验 Type 值，非法值清空走自动检测
+		t := strings.ToLower(strings.TrimSpace(setting.Channels[i].Type))
+		if t != "" && t != "text" && t != "image" && t != "video" && t != "audio" {
+			setting.Channels[i].Type = ""
 		}
 	}
 	return setting
@@ -292,7 +303,62 @@ func isImageModelName(modelName string) bool {
 }
 
 func isTextModelName(modelName string) bool {
-	return !isImageModelName(modelName) && !isVideoModelName(modelName)
+	return !isImageModelName(modelName) && !isVideoModelName(modelName) && !isAudioModelName(modelName)
+}
+
+func isAudioModelName(modelName string) bool {
+	name := strings.ToLower(strings.TrimSpace(modelName))
+	return strings.Contains(name, "audio") ||
+		strings.Contains(name, "tts") ||
+		strings.Contains(name, "speech") ||
+		strings.Contains(name, "voice") ||
+		strings.Contains(name, "music") ||
+		strings.Contains(name, "sound")
+}
+
+// classifyModelByChannel 根据渠道的 Type 字段和模型名启发式规则确定模型类型。
+// 渠道 Type 有显式值时直接使用，否则用名称关键词推断。
+func classifyModelByChannel(modelName string, channel model.ModelChannel) string {
+	if ct := channelModelType(channel); ct != "" {
+		return ct
+	}
+	// 启发式兜底
+	if isImageModelName(modelName) {
+		return "image"
+	}
+	if isVideoModelName(modelName) {
+		return "video"
+	}
+	if isAudioModelName(modelName) {
+		return "audio"
+	}
+	return "text"
+}
+
+// channelModelType 返回渠道的显式类型（空字符串表示未设置）。
+func channelModelType(channel model.ModelChannel) string {
+	switch strings.ToLower(strings.TrimSpace(channel.Type)) {
+	case "text", "image", "video", "audio":
+		return strings.ToLower(strings.TrimSpace(channel.Type))
+	default:
+		return ""
+	}
+}
+
+// collectChannelModelsByCapability 从渠道列表中收集指定能力类型的模型名。
+func collectChannelModelsByCapability(channels []model.ModelChannel, capability string) []string {
+	result := []string{}
+	for _, channel := range channels {
+		if !channel.Enabled {
+			continue
+		}
+		for _, modelName := range channel.Models {
+			if classifyModelByChannel(modelName, channel) == capability {
+				result = append(result, strings.TrimSpace(modelName))
+			}
+		}
+	}
+	return uniqueModelNames(result)
 }
 
 func normalizeModelChannel(channel model.ModelChannel) model.ModelChannel {

@@ -162,6 +162,7 @@ export type AdminModelChannel = {
     baseUrl: string;
     apiKey: string;
     models: string[];
+    type: "" | "text" | "image" | "video" | "audio";
     weight: number;
     enabled: boolean;
     remark: string;
@@ -174,6 +175,7 @@ export type AdminPublicModelChannelSettings = {
     defaultImageModel: string;
     defaultVideoModel: string;
     defaultTextModel: string;
+    defaultAudioModel: string;
     systemPrompt: string;
     allowCustomChannel: boolean;
 };

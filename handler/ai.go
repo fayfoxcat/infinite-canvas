@@ -11,11 +11,16 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/basketikun/infinite-canvas/model"
 	"github.com/basketikun/infinite-canvas/service"
 )
 
 func AIImagesGenerations(w http.ResponseWriter, r *http.Request) {
-	proxyAIRequest(w, r, "/images/generations")
+	if r.URL.Query().Get("sync") == "1" {
+		proxyAIRequest(w, r, "/images/generations")
+		return
+	}
+	asyncImageGeneration(w, r)
 }
 
 func AIImagesEdits(w http.ResponseWriter, r *http.Request) {
@@ -40,6 +45,73 @@ func AIVideo(w http.ResponseWriter, r *http.Request, id string) {
 
 func AIVideoContent(w http.ResponseWriter, r *http.Request, id string) {
 	proxyAIGetRequest(w, r, "/videos/"+id+"/content")
+}
+
+// asyncImageGeneration 创建异步图片生成任务，绕过 Cloudflare 100s 代理超时。
+func asyncImageGeneration(w http.ResponseWriter, r *http.Request) {
+	body, contentType, modelName, err := readAIRequest(r)
+	if err != nil {
+		log.Printf("async image generation read failed: %v", err)
+		Fail(w, "AI 接口请求失败")
+		return
+	}
+	user, ok := service.UserFromContext(r.Context())
+	if !ok {
+		Fail(w, "未登录或权限不足")
+		return
+	}
+	credits, err := service.ModelCost(modelName)
+	if err != nil {
+		log.Printf("async image read model cost failed: model=%s err=%v", modelName, err)
+		Fail(w, "AI 接口请求失败")
+		return
+	}
+	credits *= readAIRequestCount(body, contentType)
+	taskID, err := service.SubmitImageTask(user.ID, modelName, body, contentType, credits)
+	if err != nil {
+		FailError(w, err)
+		return
+	}
+	OK(w, map[string]string{"id": taskID, "status": model.ImageTaskStatusPending})
+}
+
+// AIImageGenerationTask 轮询异步图片生成任务状态。
+func AIImageGenerationTask(w http.ResponseWriter, r *http.Request, id string) {
+	task, err := service.GetImageTask(id)
+	if err != nil {
+		FailError(w, err)
+		return
+	}
+	user, _ := service.UserFromContext(r.Context())
+	if task.UserID != user.ID && user.Role != model.UserRoleAdmin {
+		Fail(w, "未登录或权限不足")
+		return
+	}
+	OK(w, task)
+}
+
+// AIImageGenerationResult 获取异步图片生成任务的最终结果。
+func AIImageGenerationResult(w http.ResponseWriter, r *http.Request, id string) {
+	task, err := service.GetImageTask(id)
+	if err != nil {
+		FailError(w, err)
+		return
+	}
+	user, _ := service.UserFromContext(r.Context())
+	if task.UserID != user.ID && user.Role != model.UserRoleAdmin {
+		Fail(w, "未登录或权限不足")
+		return
+	}
+	if task.Status != model.ImageTaskStatusCompleted {
+		Fail(w, "图片生成任务尚未完成")
+		return
+	}
+	if task.ResultData == "" {
+		Fail(w, "图片生成结果为空")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(task.ResultData))
 }
 
 func proxyAIGetRequest(w http.ResponseWriter, r *http.Request, path string) {
@@ -136,6 +208,12 @@ func copyAIResponse(w http.ResponseWriter, request *http.Request, onFailure func
 		if strings.EqualFold(key, "Content-Length") {
 			continue
 		}
+		// Skip CORS headers from upstream (One API) to avoid duplicates.
+		// Go's own CORS middleware sets the correct specific origin,
+		// which is required for credentialed requests (Authorization header).
+		if isCORSHeader(key) {
+			continue
+		}
 		for _, value := range values {
 			w.Header().Add(key, value)
 		}
@@ -224,6 +302,13 @@ func resolveAIProxyPath(baseURL string, modelName string, path string) string {
 		return "/contents/generations/tasks/" + strings.TrimPrefix(path, "/videos/")
 	}
 	return path
+}
+
+func isCORSHeader(key string) bool {
+	k := strings.ToLower(key)
+	return strings.HasPrefix(k, "access-control-allow-") ||
+		strings.HasPrefix(k, "access-control-expose-") ||
+		k == "access-control-max-age"
 }
 
 func isArkSeedanceVideo(baseURL string, modelName string) bool {
