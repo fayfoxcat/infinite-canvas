@@ -281,9 +281,11 @@ func repairDefaultModel(current string, models []string, preferred func(string) 
 			return current
 		}
 	}
-	for _, item := range models {
-		if preferred(item) {
-			return item
+	if preferred != nil {
+		for _, item := range models {
+			if preferred(item) {
+				return item
+			}
 		}
 	}
 	if len(models) > 0 {
