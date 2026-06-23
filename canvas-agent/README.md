@@ -1,6 +1,6 @@
 # Infinite Canvas Agent
 
-本地 Canvas Agent 用来连接线上画布网页和用户电脑上的 Codex / Claude Code。
+本地 Canvas Agent 用来连接画布网页和用户电脑上的 Codex / Claude Code。本地开发时优先连接 `http://localhost:3000`，不需要先使用线上站点。
 
 ## 启动
 
@@ -26,6 +26,8 @@ Connect token: xxxxxx
 
 在画布右上角点击 `Agent`，填入地址和 token 后连接。
 
+Codex app 插件会读取启动输出里的 Local URL 和 Connect token，并直接打开画布网页地址；Canvas Agent 不负责生成画布打开 URL。
+
 Canvas Agent 默认只监听 `127.0.0.1`。网页第一次带正确 token 连接后，Canvas Agent 会记录该网页 Origin；之后其他 Origin 不能复用这个本地 Agent，除非用户清理 `~/.infinite-canvas/canvas-agent.json` 里的 `origins`。
 
 ## 发布
@@ -37,6 +39,26 @@ Canvas Agent 默认只监听 `127.0.0.1`。网页第一次带正确 token 连接
 ## Codex MCP
 
 如果希望 Codex 终端能直接操作画布，需要先把 Canvas Agent 注册成 Codex MCP。
+
+### Codex app 插件
+
+仓库内提供了 Codex app 插件：`plugins/infinite-canvas`。在 Codex app 中添加本仓库的 marketplace 后，可以安装 `Infinite Canvas` 插件；插件会注册同一个 `infinite-canvas` MCP，并带上画布操作说明。
+
+添加本地 marketplace 时建议使用仓库绝对路径，避免 Codex 从其他工作目录解析失败：
+
+```bash
+cd /path/to/infinite-canvas
+codex plugin marketplace add "$(pwd)"
+codex plugin add infinite-canvas@infinite-canvas-local
+```
+
+插件默认通过 npm 启动 MCP：
+
+```bash
+npx -y @basketikun/canvas-agent mcp
+```
+
+使用时可以直接在 Codex 里说“打开 Infinite Canvas”，插件会优先启动本地画布和本地 Agent，读取 Local URL 和 Connect token，然后直接打开画布网页地址新建并连接画布。如果自动连接失败，再检查本地画布服务和 Canvas Agent 是否都已启动。
 
 Canvas Agent 启动后，给 Codex 添加 MCP：
 

@@ -50,7 +50,7 @@ canvas-agent/
 
 原因：
 
-- 这是用户本机运行的 Node 服务，不属于线上 Go 后端，也不属于纯前端页面。
+- 这是用户本机运行的 Node 服务，不属于线上服务端，也不属于纯前端页面。
 - 后续可以发布成 npm 包，用户通过 `npx` 或全局安装启动。
 - Codex SDK、Codex MCP、Claude SDK 都更适合在本地 Node 进程中接入。
 - HTTP 路由使用 Express，MCP 协议层使用官方 `@modelcontextprotocol/sdk`，工具入参使用 `zod`，避免手写协议和松散 JSON。

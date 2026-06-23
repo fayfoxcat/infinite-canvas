@@ -2,39 +2,31 @@ import axios from "axios";
 
 import { audioMimeType, normalizeAudioFormatValue, normalizeAudioSpeedValue, normalizeAudioVoiceValue } from "@/lib/audio-generation";
 import { uploadMediaFile, type UploadedFile } from "@/services/file-storage";
-import { buildApiUrl, type AiConfig } from "@/stores/use-config-store";
-import { useUserStore } from "@/stores/use-user-store";
+import { buildApiUrl, resolveModelRequestConfig, type AiConfig } from "@/stores/use-config-store";
+
+type RequestOptions = { signal?: AbortSignal };
 
 function aiApiUrl(config: AiConfig, path: string) {
-    return config.channelMode === "remote" ? `/api/v1${path}` : buildApiUrl(config.baseUrl, path);
+    return buildApiUrl(config.baseUrl, path);
 }
 
 function aiHeaders(config: AiConfig) {
-    const token = useUserStore.getState().token;
-    return config.channelMode === "remote"
-        ? {
-              ...(token ? { Authorization: `Bearer ${token}` } : {}),
-              "Content-Type": "application/json",
-          }
-        : {
-              Authorization: `Bearer ${config.apiKey}`,
-              "Content-Type": "application/json",
-          };
+    return {
+        Authorization: `Bearer ${config.apiKey}`,
+        "Content-Type": "application/json",
+    };
 }
 
-function refreshRemoteUser(config: AiConfig) {
-    if (config.channelMode === "remote") void useUserStore.getState().hydrateUser();
-}
-
-export async function requestAudioGeneration(config: AiConfig, prompt: string): Promise<Blob> {
-    const model = (config.model || config.audioModel).trim();
-    assertAudioConfig(config, model);
+export async function requestAudioGeneration(config: AiConfig, prompt: string, options?: RequestOptions): Promise<Blob> {
+    const requestConfig = resolveModelRequestConfig(config, config.model || config.audioModel);
+    const model = requestConfig.model.trim();
+    assertAudioConfig(requestConfig, model);
     const format = normalizeAudioFormatValue(config.audioFormat);
     const instructions = config.audioInstructions.trim();
 
     try {
         const response = await axios.post<Blob>(
-            aiApiUrl(config, "/audio/speech"),
+            aiApiUrl(requestConfig, "/audio/speech"),
             {
                 model,
                 input: prompt,
@@ -43,10 +35,9 @@ export async function requestAudioGeneration(config: AiConfig, prompt: string): 
                 speed: Number(normalizeAudioSpeedValue(config.audioSpeed)),
                 ...(instructions ? { instructions } : {}),
             },
-            { headers: aiHeaders(config), responseType: "blob" },
+            { headers: aiHeaders(requestConfig), responseType: "blob", signal: options?.signal },
         );
         await assertAudioBlob(response.data);
-        refreshRemoteUser(config);
         return response.data.type.startsWith("audio/") ? response.data : new Blob([response.data], { type: audioMimeType(format) });
     } catch (error) {
         throw new Error(readAxiosError(error, "音频生成失败"));
@@ -60,8 +51,9 @@ export async function storeGeneratedAudio(blob: Blob, format = "mp3"): Promise<U
 
 function assertAudioConfig(config: AiConfig, model: string) {
     if (!model) throw new Error("请先配置音频模型");
-    if (config.channelMode === "local" && !config.baseUrl.trim()) throw new Error("请先配置 Base URL");
-    if (config.channelMode === "local" && !config.apiKey.trim()) throw new Error("请先配置 API Key");
+    if (!config.baseUrl.trim()) throw new Error("请先配置 Base URL");
+    if (!config.apiKey.trim()) throw new Error("请先配置 API Key");
+    if (config.apiFormat === "gemini") throw new Error("Gemini 调用格式暂不支持音频生成，请使用 OpenAI 格式渠道");
 }
 
 async function assertAudioBlob(blob: Blob) {
@@ -77,6 +69,7 @@ async function assertAudioBlob(blob: Blob) {
 }
 
 function readAxiosError(error: unknown, fallback: string) {
+    if (axios.isCancel(error)) return "请求已取消";
     if (axios.isAxiosError<{ error?: { message?: string }; msg?: string; code?: number }>(error)) {
         const responseData = error.response?.data;
         return responseData?.msg || responseData?.error?.message || statusMessage(error.response?.status, fallback);

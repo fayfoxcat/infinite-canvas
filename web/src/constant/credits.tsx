@@ -14,7 +14,7 @@ export type ModelCreditCost = {
     credits: number;
 };
 
-export function modelCreditCost(modelCosts: ModelCreditCost[] | undefined, model: string) {
+function modelCreditCost(modelCosts: ModelCreditCost[] | undefined, model: string) {
     return modelCosts?.find((item) => item.model === model)?.credits || 0;
 }
 

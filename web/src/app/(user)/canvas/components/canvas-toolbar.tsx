@@ -1,7 +1,7 @@
 import type { CSSProperties, MouseEvent as ReactMouseEvent, ReactNode, RefObject } from "react";
 import { useRef, useState } from "react";
 import { Button, Segmented, Switch } from "antd";
-import { CircleDot, Eraser, FolderOpen, Grid2x2, Hand, Image as ImageIcon, Info, Library, Moon, Music2, Palette, Redo2, Settings2, Square, Sun, Trash2, Type, Undo2, Upload, Video } from "lucide-react";
+import { CircleDot, Eraser, FolderOpen, Grid2x2, Hand, Image as ImageIcon, Info, Moon, Music2, Palette, Redo2, Settings2, Square, Sun, Trash2, Type, Undo2, Upload, Video } from "lucide-react";
 
 import { canvasThemes, type CanvasBackgroundMode, type CanvasColorTheme, type CanvasTheme } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
@@ -26,7 +26,6 @@ export function CanvasToolbar({
     onDeselect,
     onBackgroundModeChange,
     onShowImageInfoChange,
-    onOpenAssetLibrary,
     onOpenMyAssets,
 }: {
     selectedCount: number;
@@ -47,7 +46,6 @@ export function CanvasToolbar({
     onDeselect: () => void;
     onBackgroundModeChange: (mode: CanvasBackgroundMode) => void;
     onShowImageInfoChange: (show: boolean) => void;
-    onOpenAssetLibrary: () => void;
     onOpenMyAssets: () => void;
 }) {
     const wrapRef = useRef<HTMLDivElement>(null);
@@ -96,9 +94,6 @@ export function CanvasToolbar({
                     <Upload className="size-4.5" />
                 </ToolbarButton>
                 <Divider theme={theme} />
-                <ToolbarButton id="tool-library" label="素材库" hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onOpenAssetLibrary}>
-                    <Library className="size-4.5" />
-                </ToolbarButton>
                 <ToolbarButton id="tool-assets" label="我的素材" hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onOpenMyAssets}>
                     <FolderOpen className="size-4.5" />
                 </ToolbarButton>
@@ -287,7 +282,6 @@ function toolLabel(id: string) {
     if (id === "tool-audio") return "音频";
     if (id === "tool-config") return "生成配置";
     if (id === "tool-upload") return "上传素材";
-    if (id === "tool-library") return "素材库";
     if (id === "tool-assets") return "我的素材";
     if (id === "tool-style") return "画布外观";
     if (id === "tool-delete") return "删除选中";

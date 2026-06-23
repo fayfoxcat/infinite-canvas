@@ -5,7 +5,7 @@ import { Button, Tooltip } from "antd";
 import { ArrowUp, CheckCircle2, CircleAlert, ImagePlus, LoaderCircle, UserRound, Wrench, X, XCircle } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
-import type { AuthUser } from "@/services/api/auth";
+import type { LocalUser } from "@/stores/use-user-store";
 
 export type CanvasAgentChatAttachment = { id: string; name: string; url: string };
 export type CanvasAgentMode = "online" | "local";
@@ -21,7 +21,7 @@ export type CanvasAgentChatMessage = {
 
 const WORKING_TEXT = "working...";
 
-export function AgentChatMessage({ item, theme, user, onRejectTool, onApproveTool }: { item: CanvasAgentChatMessage; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; user: AuthUser | null; onRejectTool?: (id: string) => void; onApproveTool?: (id: string) => void }) {
+export function AgentChatMessage({ item, theme, user, onRejectTool, onApproveTool }: { item: CanvasAgentChatMessage; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; user: LocalUser | null; onRejectTool?: (id: string) => void; onApproveTool?: (id: string) => void }) {
     const isUser = item.role === "user";
     const isSystem = item.role === "system";
     const color = item.role === "error" ? "#dc2626" : item.role === "tool" ? "#2563eb" : theme.node.text;
@@ -48,7 +48,7 @@ export function AgentChatMessage({ item, theme, user, onRejectTool, onApproveToo
         <div className={`flex items-start gap-3 ${isUser ? "justify-end" : "justify-start"}`}>
             {!isUser ? <AgentAvatar theme={theme} /> : null}
             <div className={`min-w-0 max-w-[82%] text-sm leading-6 ${isUser ? "text-right" : "text-left"}`} style={{ color }}>
-                <div className="whitespace-pre-wrap break-words">{item.text}</div>
+                <div className="whitespace-pre-wrap break-words text-left">{item.text}</div>
                 {item.attachments?.length ? <AgentMessageAttachments attachments={item.attachments} /> : null}
                 {item.meta ? <div className="mt-1 text-[11px] opacity-45">{item.meta}</div> : null}
             </div>
@@ -173,7 +173,7 @@ export function AgentChatComposer({
     const fileInputRef = useRef<HTMLInputElement>(null);
     const canSubmit = !disabled && !sending && Boolean(prompt.trim() || attachments.length);
     return (
-        <div className="border-t px-2 pb-2 pt-2" style={{ borderColor: theme.node.stroke }} onWheelCapture={(event) => event.stopPropagation()}>
+        <div className="px-2 pb-2 pt-2" onWheelCapture={(event) => event.stopPropagation()}>
             <div className="rounded-[24px] border px-3 pb-3 pt-3 shadow-lg" style={{ background: theme.toolbar.panel, borderColor: theme.node.stroke }}>
                 {attachments.length ? (
                     <div className="thin-scrollbar mb-2 flex gap-2 overflow-x-auto pb-1">
@@ -276,7 +276,7 @@ function AgentAvatar({ theme }: { theme: (typeof canvasThemes)[keyof typeof canv
     );
 }
 
-function AgentUserAvatar({ user, theme }: { user: AuthUser | null; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
+function AgentUserAvatar({ user, theme }: { user: LocalUser | null; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
     const avatarUrl = user?.avatarUrl?.trim();
     return (
         <span className="grid size-8 shrink-0 place-items-center overflow-hidden rounded-full" style={{ color: theme.node.text }}>

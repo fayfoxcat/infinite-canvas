@@ -1,4 +1,4 @@
-import type { ChatCompletionMessage } from "@/services/api/image";
+import type { AiTextMessage } from "@/services/api/image";
 import { imageReferenceLabel } from "@/lib/image-reference-prompt";
 import { seedanceReferenceLabel } from "@/lib/seedance-video";
 import type { ReferenceImage } from "@/types/image";
@@ -127,7 +127,7 @@ export function buildNodeGenerationInputs(nodeId: string, nodes: CanvasNodeData[
     });
 }
 
-export function buildNodeChatMessages(context: NodeGenerationContext): ChatCompletionMessage[] {
+export function buildNodeResponseMessages(context: NodeGenerationContext): AiTextMessage[] {
     if (!context.referenceImages.length) {
         return [{ role: "user", content: context.prompt }];
     }
