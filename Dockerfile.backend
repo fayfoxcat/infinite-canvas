@@ -27,6 +27,7 @@ ENV DATABASE_DSN=/app/data/infinite-canvas.db
 WORKDIR /app
 RUN mkdir -p /app/data
 COPY --from=build /server /app/server
+COPY --from=build /app/config /app/config
 
 EXPOSE 8080
 CMD ["/app/server"]

@@ -1,0 +1,6 @@
+{
+  "textModels": "gpt-*\nclaude-*\ngemini-*\nqwen-*\ndeepseek-*\nllama-*\nmixtral-*\nchata-*\nhunyuan-*\nernie-*\nglm-*",
+  "imageModels": "gpt-image-*\nseedream-*\ndall-e-*\nflux-*\nmidjourney-*\nnano-banana*\nstable-diffusion*\nimagen-*",
+  "videoModels": "seedance-*\nsora-*\nkling-*\nrunway-*\npika-*\nhailuo-*\nveo-*",
+  "audioModels": "tts-*\nwhisper-*\nspeech-*\nvoice-*\nmelotts-*\ncosyvoice-*"
+}

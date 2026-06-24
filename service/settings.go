@@ -5,15 +5,18 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"math/rand"
 	"net/http"
 	"net/url"
+	"os"
 	"regexp"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/basketikun/infinite-canvas/config"
 	"github.com/basketikun/infinite-canvas/model"
 	"github.com/basketikun/infinite-canvas/repository"
 )
@@ -41,6 +44,8 @@ func SaveSettings(settings model.Settings) (model.Settings, error) {
 	result, err := repository.SaveSettings(settings, now())
 	if err == nil {
 		RefreshPromptSyncScheduler()
+		// 同步写回模型类型规则文件
+		_ = saveModelTypeRulesToFile(settings.Public.ModelChannel.ModelTypeRules)
 	}
 	return hidePrivateAPIKeys(result), err
 }
@@ -64,10 +69,30 @@ func AdminTestChannelModel(index *int, channel model.ModelChannel, modelName str
 	return testAdminChannelModel(resolved, modelName)
 }
 
+var modelTypeRulesSeeded bool
+
 func normalizeSettings(settings model.Settings) model.Settings {
 	settings.Private = normalizePrivateSetting(settings.Private)
 	settings.Public = normalizePublicSettingWithChannels(settings.Public, settings.Private.Channels)
+
+	// 首次从文件种入默认规则后，自动持久化到 DB
+	if !modelTypeRulesSeeded && hasModelTypeRules(settings.Public.ModelChannel.ModelTypeRules) {
+		modelTypeRulesSeeded = true
+		go func(rules model.ModelTypeRules) {
+			if s, err := repository.GetSettings(); err == nil {
+				s.Public.ModelChannel.ModelTypeRules = rules
+				if _, err := repository.SaveSettings(s, now()); err == nil {
+					log.Println("model type rules seeded from file into database")
+				}
+			}
+		}(settings.Public.ModelChannel.ModelTypeRules)
+	}
+
 	return settings
+}
+
+func hasModelTypeRules(rules model.ModelTypeRules) bool {
+	return rules.TextModels != "" || rules.ImageModels != "" || rules.VideoModels != "" || rules.AudioModels != ""
 }
 
 func normalizePublicSetting(setting model.PublicSetting) model.PublicSetting {
@@ -95,6 +120,9 @@ func normalizePublicSettingWithChannels(setting model.PublicSetting, channels []
 		enabled := true
 		setting.Auth.AllowRegister = &enabled
 	}
+	// 若 DB 中规则为空且配置文件存在，则从文件种入默认规则
+	seedModelTypeRulesFromFile(&setting.ModelChannel.ModelTypeRules)
+
 	// 刷新全局模型类型规则缓存
 	refreshModelTypeRulesCache(setting.ModelChannel.ModelTypeRules)
 
@@ -396,6 +424,50 @@ func refreshModelTypeRulesCache(rules model.ModelTypeRules) {
 	cachedRulesMu.Lock()
 	cachedModelTypeRules = rules
 	cachedRulesMu.Unlock()
+}
+
+// --- 模型类型规则文件持久化 ---
+
+// seedModelTypeRulesFromFile 若 DB 中规则全空，从配置文件种入默认值。
+func seedModelTypeRulesFromFile(rules *model.ModelTypeRules) {
+	if rules.TextModels != "" || rules.ImageModels != "" || rules.VideoModels != "" || rules.AudioModels != "" {
+		return // 已有用户配置，不覆盖
+	}
+	fromFile, err := loadModelTypeRulesFromFile()
+	if err != nil {
+		return
+	}
+	*rules = fromFile
+}
+
+// loadModelTypeRulesFromFile 从配置文件中读取模型类型规则。
+func loadModelTypeRulesFromFile() (model.ModelTypeRules, error) {
+	path := config.Cfg.ModelTypeRulesFile
+	if path == "" {
+		return model.ModelTypeRules{}, errors.New("MODEL_TYPE_RULES_FILE not configured")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return model.ModelTypeRules{}, err
+	}
+	var rules model.ModelTypeRules
+	if err := json.Unmarshal(data, &rules); err != nil {
+		return model.ModelTypeRules{}, err
+	}
+	return rules, nil
+}
+
+// saveModelTypeRulesToFile 将模型类型规则持久化到配置文件。
+func saveModelTypeRulesToFile(rules model.ModelTypeRules) error {
+	path := config.Cfg.ModelTypeRulesFile
+	if path == "" {
+		return nil
+	}
+	data, err := json.MarshalIndent(rules, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, append(data, '\n'), 0644)
 }
 
 // matchModelTypeRules 检查模型名是否匹配全局类型规则，返回所有匹配的类型。
