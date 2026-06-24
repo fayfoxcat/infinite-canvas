@@ -38,9 +38,10 @@ type ImageSettingsPanelProps = {
     className?: string;
     maxCount?: number;
     quickCount?: number;
+    showCount?: boolean;
 };
 
-export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = true, className = "w-[320px] space-y-4 rounded-2xl px-1 py-0.5", maxCount = 15, quickCount = 10 }: ImageSettingsPanelProps) {
+export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = true, className = "w-[320px] space-y-4 rounded-2xl px-1 py-0.5", maxCount = 15, quickCount = 10, showCount = true }: ImageSettingsPanelProps) {
     const [snapDimensionToStep, setSnapDimensionToStep] = useState(true);
     const quality = config.quality || "auto";
     const count = Math.max(1, Math.min(maxCount, Math.floor(Math.abs(Number(config.count)) || 1)));
@@ -116,17 +117,19 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                         ))}
                     </div>
                 </div>
-                <div className="space-y-2.5">
-                    <SettingTitle color={theme.node.muted}>生成张数</SettingTitle>
-                    <div className="grid grid-cols-4 gap-2.5">
-                        {Array.from({ length: quickCount }, (_, index) => index + 1).map((value) => (
-                            <OptionPill key={value} selected={count === value} theme={theme} onClick={() => onConfigChange("count", String(value))}>
-                                {value} 张
-                            </OptionPill>
-                        ))}
-                        <CountInput value={count} max={maxCount} theme={theme} onChange={(value) => onConfigChange("count", String(value || 1))} />
+                {showCount ? (
+                    <div className="space-y-2.5">
+                        <SettingTitle color={theme.node.muted}>生成张数</SettingTitle>
+                        <div className="grid grid-cols-4 gap-2.5">
+                            {Array.from({ length: quickCount }, (_, index) => index + 1).map((value) => (
+                                <OptionPill key={value} selected={count === value} theme={theme} onClick={() => onConfigChange("count", String(value))}>
+                                    {value} 张
+                                </OptionPill>
+                            ))}
+                            <CountInput value={count} max={maxCount} theme={theme} onChange={(value) => onConfigChange("count", String(value || 1))} />
+                        </div>
                     </div>
-                </div>
+                ) : null}
             </div>
         </ImageSettingsTheme>
     );
