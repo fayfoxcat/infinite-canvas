@@ -16,7 +16,6 @@ type ModelChannel struct {
 	BaseURL  string   `json:"baseUrl"`
 	APIKey   string   `json:"apiKey"`
 	Models   []string `json:"models"`
-	Type     string   `json:"type"` // "", "text", "image", "video", "audio"；空表示自动检测
 	Weight   int      `json:"weight"`
 	Enabled  bool     `json:"enabled"`
 	Remark   string   `json:"remark"`

@@ -41,7 +41,7 @@ const emptySettings: AdminSettings = {
     },
     private: { channels: [], promptSync: { enabled: true, cron: "*/5 * * * *" }, auth: { linuxDo: { clientId: "", clientSecret: "" } } },
 };
-const emptyChannel: AdminModelChannel = { protocol: "openai", name: "", baseUrl: "", apiKey: "", models: [], type: "", weight: 1, enabled: true, remark: "" };
+const emptyChannel: AdminModelChannel = { protocol: "openai", name: "", baseUrl: "", apiKey: "", models: [], weight: 1, enabled: true, remark: "" };
 
 type SettingsTabKey = "public" | "private";
 type EditorMode = "visual" | "json";
@@ -646,27 +646,12 @@ export default function AdminSettingsPage() {
                                     <Select options={[{ label: "OpenAI", value: "openai" }]} />
                                 </Form.Item>
                             </Col>
-                            <Col span={8}>
+                            <Col span={12}>
                                 <Form.Item name="weight" label="权重">
                                     <InputNumber min={1} step={1} className="!w-full" />
                                 </Form.Item>
                             </Col>
-                            <Col span={8}>
-                                <Form.Item name="type" label="模型类型">
-                                    <Select
-                                        allowClear
-                                        placeholder="自动检测"
-                                        options={[
-                                            { label: "自动检测", value: "" },
-                                            { label: "文本", value: "text" },
-                                            { label: "图片", value: "image" },
-                                            { label: "视频", value: "video" },
-                                            { label: "音频", value: "audio" },
-                                        ]}
-                                    />
-                                </Form.Item>
-                            </Col>
-                            <Col span={8}>
+                            <Col span={12}>
                                 <Form.Item name="enabled" label="启用" valuePropName="checked">
                                     <Switch />
                                 </Form.Item>
@@ -897,7 +882,6 @@ function normalizeChannel(item: Partial<AdminModelChannel> = {}): AdminModelChan
         baseUrl: item.baseUrl || "",
         apiKey: item.apiKey || "",
         models: item.models || [],
-        type: item.type || "",
         weight: Math.max(1, Number(item.weight) || 1),
         enabled: item.enabled !== false,
         remark: item.remark || "",
