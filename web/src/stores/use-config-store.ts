@@ -106,10 +106,11 @@ function resolveEffectiveConfig(config: AiConfig, modelChannel: AdminPublicSetti
     const channelMode = modelChannel?.allowCustomChannel ? config.channelMode : "remote";
     if (channelMode === "local" || !modelChannel) return { ...config, channelMode };
     const models = modelChannel.availableModels;
-    const textModels = filterModelsByCapability(models, "text");
-    const imageModels = filterModelsByCapability(models, "image");
-    const videoModels = filterModelsByCapability(models, "video");
-    const audioModels = filterModelsByCapability(models, "audio");
+    // 优先使用服务端按全局规则分类的列表，客户端启发式作兜底
+    const textModels = modelChannel.textModels?.length ? modelChannel.textModels : filterModelsByCapability(models, "text");
+    const imageModels = modelChannel.imageModels?.length ? modelChannel.imageModels : filterModelsByCapability(models, "image");
+    const videoModels = modelChannel.videoModels?.length ? modelChannel.videoModels : filterModelsByCapability(models, "video");
+    const audioModels = modelChannel.audioModels?.length ? modelChannel.audioModels : filterModelsByCapability(models, "audio");
     const fallbackTextModel = validDefault(modelChannel.defaultTextModel, textModels) || preferredModel(textModels, isTextModelName);
     const fallbackModel = validDefault(modelChannel.defaultModel, textModels) || fallbackTextModel;
     const fallbackImageModel = validDefault(modelChannel.defaultImageModel, imageModels) || preferredModel(imageModels, isImageModelName);

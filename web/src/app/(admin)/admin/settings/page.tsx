@@ -28,6 +28,10 @@ const emptySettings: AdminSettings = {
     public: {
         modelChannel: {
             availableModels: [],
+            textModels: [],
+            imageModels: [],
+            videoModels: [],
+            audioModels: [],
             modelCosts: [],
             defaultModel: "",
             defaultImageModel: "",

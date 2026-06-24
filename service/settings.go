@@ -137,6 +137,12 @@ func normalizePublicSettingWithChannels(setting model.PublicSetting, channels []
 	textModels := collectChannelModelsByCapability(channels, "text")
 	audioModels := collectChannelModelsByCapability(channels, "audio")
 
+	// 暴露分类结果给前端
+	setting.ModelChannel.TextModels = textModels
+	setting.ModelChannel.ImageModels = imageModels
+	setting.ModelChannel.VideoModels = videoModels
+	setting.ModelChannel.AudioModels = audioModels
+
 	setting.ModelChannel.DefaultImageModel = repairDefaultModel(setting.ModelChannel.DefaultImageModel, imageModels, nil)
 	setting.ModelChannel.DefaultVideoModel = repairDefaultModel(setting.ModelChannel.DefaultVideoModel, videoModels, nil)
 	setting.ModelChannel.DefaultTextModel = repairDefaultModel(setting.ModelChannel.DefaultTextModel, textModels, nil)

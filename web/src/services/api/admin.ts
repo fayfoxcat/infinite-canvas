@@ -177,6 +177,10 @@ export type AdminModelTypeRules = {
 
 export type AdminPublicModelChannelSettings = {
     availableModels: string[];
+    textModels: string[];
+    imageModels: string[];
+    videoModels: string[];
+    audioModels: string[];
     modelCosts: AdminModelCost[];
     defaultModel: string;
     defaultImageModel: string;
