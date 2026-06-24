@@ -36,14 +36,15 @@ const emptySettings: AdminSettings = {
             defaultAudioModel: "",
             systemPrompt: "",
             allowCustomChannel: true,
+            modelTypeRules: { textModels: "", imageModels: "", videoModels: "", audioModels: "" },
         },
         auth: { allowRegister: true, linuxDo: { enabled: false } },
     },
     private: { channels: [], promptSync: { enabled: true, cron: "*/5 * * * *" }, auth: { linuxDo: { clientId: "", clientSecret: "" } } },
 };
-const emptyChannel: AdminModelChannel = { protocol: "openai", name: "", baseUrl: "", apiKey: "", models: [], weight: 1, enabled: true, remark: "" };
+const emptyChannel: AdminModelChannel = { protocol: "openai", name: "", baseUrl: "", apiKey: "", models: [], type: "", weight: 1, enabled: true, remark: "" };
 
-type SettingsTabKey = "public" | "private";
+type SettingsTabKey = "public" | "private" | "general";
 type EditorMode = "visual" | "json";
 type ModelSelectTabKey = "new" | "current";
 
@@ -52,8 +53,8 @@ export default function AdminSettingsPage() {
     const { message } = App.useApp();
     const [form] = Form.useForm<AdminSettings>();
     const [activeTab, setActiveTab] = useState<SettingsTabKey>("public");
-    const [editorMode, setEditorMode] = useState<Record<SettingsTabKey, EditorMode>>({ public: "visual", private: "visual" });
-    const [jsonText, setJsonText] = useState<Record<SettingsTabKey, string>>({ public: "", private: "" });
+    const [editorMode, setEditorMode] = useState<Record<SettingsTabKey, EditorMode>>({ public: "visual", private: "visual", general: "visual" });
+    const [jsonText, setJsonText] = useState<Record<SettingsTabKey, string>>({ public: "", private: "", general: "" });
     const [channels, setChannels] = useState<AdminModelChannel[]>([]);
     const [channelForm] = Form.useForm<AdminModelChannel>();
     const [editingChannelIndex, setEditingChannelIndex] = useState<number | null>(null);
@@ -100,6 +101,7 @@ export default function AdminSettingsPage() {
             setJsonText({
                 public: JSON.stringify(data.public, null, 2),
                 private: JSON.stringify(data.private, null, 2),
+                general: JSON.stringify(data.public, null, 2),
             });
         } catch (error) {
             message.error(error instanceof Error ? error.message : "读取设置失败");
@@ -133,6 +135,7 @@ export default function AdminSettingsPage() {
             setJsonText({
                 public: JSON.stringify(merged.public, null, 2),
                 private: JSON.stringify(merged.private, null, 2),
+                general: JSON.stringify(merged.public, null, 2),
             });
             message.success("已保存");
         } catch (error) {
@@ -369,6 +372,7 @@ export default function AdminSettingsPage() {
                             items={[
                                 { key: "public", label: "公开配置（对外暴露）" },
                                 { key: "private", label: "私有配置（不会对外暴露）" },
+                                { key: "general", label: "通用配置（模型类型规则）" },
                             ]}
                         />
                         <Space>
@@ -502,6 +506,31 @@ export default function AdminSettingsPage() {
                                 />
                             </div>
                         )
+                    ) : activeTab === "general" ? (
+                        <Form form={form} layout="vertical" initialValues={emptySettings} requiredMark={false}>
+                            <Row gutter={16}>
+                                <Col xs={24} md={12}>
+                                    <Form.Item name={["public", "modelChannel", "modelTypeRules", "textModels"]} label="文本模型匹配" extra="每行一个模式，支持 glob (*, ?) 和 /正则/">
+                                        <Input.TextArea rows={4} placeholder={"gpt-*\nclaude-*\ndeepseek-*"} style={{ fontFamily: "monospace", fontSize: 13 }} />
+                                    </Form.Item>
+                                </Col>
+                                <Col xs={24} md={12}>
+                                    <Form.Item name={["public", "modelChannel", "modelTypeRules", "imageModels"]} label="图片模型匹配" extra="每行一个模式，支持 glob 和正则">
+                                        <Input.TextArea rows={4} placeholder={"gpt-image-*\nseedream-*\ndall-e-*"} style={{ fontFamily: "monospace", fontSize: 13 }} />
+                                    </Form.Item>
+                                </Col>
+                                <Col xs={24} md={12}>
+                                    <Form.Item name={["public", "modelChannel", "modelTypeRules", "videoModels"]} label="视频模型匹配" extra="每行一个模式，支持 glob 和正则">
+                                        <Input.TextArea rows={4} placeholder={"seedance-*\nsora-*\nkling-*"} style={{ fontFamily: "monospace", fontSize: 13 }} />
+                                    </Form.Item>
+                                </Col>
+                                <Col xs={24} md={12}>
+                                    <Form.Item name={["public", "modelChannel", "modelTypeRules", "audioModels"]} label="音频模型匹配" extra="每行一个模式，支持 glob 和正则">
+                                        <Input.TextArea rows={4} placeholder={"tts-*\nwhisper-*\nspeech-*"} style={{ fontFamily: "monospace", fontSize: 13 }} />
+                                    </Form.Item>
+                                </Col>
+                            </Row>
+                        </Form>
                     ) : activeMode === "visual" ? (
                         <Form form={form} layout="vertical" initialValues={emptySettings} requiredMark={false}>
                             <Flex vertical gap={12}>
@@ -646,12 +675,27 @@ export default function AdminSettingsPage() {
                                     <Select options={[{ label: "OpenAI", value: "openai" }]} />
                                 </Form.Item>
                             </Col>
-                            <Col span={12}>
+                            <Col span={8}>
                                 <Form.Item name="weight" label="权重">
                                     <InputNumber min={1} step={1} className="!w-full" />
                                 </Form.Item>
                             </Col>
-                            <Col span={12}>
+                            <Col span={8}>
+                                <Form.Item name="type" label="模型类型">
+                                    <Select
+                                        allowClear
+                                        placeholder="自动检测"
+                                        options={[
+                                            { label: "自动检测", value: "" },
+                                            { label: "文本", value: "text" },
+                                            { label: "图片", value: "image" },
+                                            { label: "视频", value: "video" },
+                                            { label: "音频", value: "audio" },
+                                        ]}
+                                    />
+                                </Form.Item>
+                            </Col>
+                            <Col span={8}>
                                 <Form.Item name="enabled" label="启用" valuePropName="checked">
                                     <Switch />
                                 </Form.Item>
@@ -882,6 +926,7 @@ function normalizeChannel(item: Partial<AdminModelChannel> = {}): AdminModelChan
         baseUrl: item.baseUrl || "",
         apiKey: item.apiKey || "",
         models: item.models || [],
+        type: item.type || "",
         weight: Math.max(1, Number(item.weight) || 1),
         enabled: item.enabled !== false,
         remark: item.remark || "",
@@ -945,10 +990,14 @@ function modelSummary(models: string[]) {
 
 function parseTabJson(tab: "public", value: string): AdminSettings["public"] | null;
 function parseTabJson(tab: "private", value: string): AdminSettings["private"] | null;
+function parseTabJson(tab: "general", value: string): AdminSettings["public"] | null;
 function parseTabJson(tab: SettingsTabKey, value: string): AdminSettings[SettingsTabKey] | null;
 function parseTabJson(tab: SettingsTabKey, value: string): AdminSettings[SettingsTabKey] | null {
     try {
-        return tab === "public" ? normalizePublicSetting(JSON.parse(value) as Partial<AdminSettings["public"]>) : normalizePrivateSetting(JSON.parse(value) as Partial<AdminSettings["private"]>);
+        if (tab === "private") {
+            return normalizePrivateSetting(JSON.parse(value) as Partial<AdminSettings["private"]>);
+        }
+        return normalizePublicSetting(JSON.parse(value) as Partial<AdminSettings["public"]>);
     } catch {
         return null;
     }
@@ -971,6 +1020,14 @@ async function collectSettings(form: any, editorMode: Record<SettingsTabKey, Edi
             return null;
         }
         values.private = privateSetting;
+    }
+    if (editorMode.general === "json") {
+        const publicSetting = parseTabJson("general", jsonText.general);
+        if (!publicSetting) {
+            message.error("通用配置 JSON 格式不正确");
+            return null;
+        }
+        values.public = publicSetting;
     }
     values.public.modelChannel.availableModels = collectChannelModels(values.private.channels);
     return normalizeSettings(values);

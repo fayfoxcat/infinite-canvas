@@ -8,8 +8,10 @@ import (
 	"math/rand"
 	"net/http"
 	"net/url"
+	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/basketikun/infinite-canvas/model"
@@ -93,6 +95,9 @@ func normalizePublicSettingWithChannels(setting model.PublicSetting, channels []
 		enabled := true
 		setting.Auth.AllowRegister = &enabled
 	}
+	// 刷新全局模型类型规则缓存
+	refreshModelTypeRulesCache(setting.ModelChannel.ModelTypeRules)
+
 	enabledModels := enabledChannelModels(channels)
 	if len(enabledModels) > 0 {
 		setting.ModelChannel.AvailableModels = enabledModels
@@ -140,6 +145,11 @@ func normalizePrivateSetting(setting model.PrivateSetting) model.PrivateSetting 
 		}
 		if setting.Channels[i].Weight <= 0 {
 			setting.Channels[i].Weight = 1
+		}
+		// 校验 Type 值，非法值清空走自动检测
+		t := strings.ToLower(strings.TrimSpace(setting.Channels[i].Type))
+		if t != "" && t != "text" && t != "image" && t != "video" && t != "audio" {
+			setting.Channels[i].Type = ""
 		}
 	}
 	return setting
@@ -313,36 +323,148 @@ func isAudioModelName(modelName string) bool {
 		strings.Contains(name, "sound")
 }
 
-	// classifyModel 根据模型名称启发式推断其能力类型（text / image / video / audio）。
-	// 注意：video 优先于 image 检查，避免 "grok-imagine-video" 被 image 误判。
-	func classifyModel(modelName string) string {
-		if isVideoModelName(modelName) {
-			return "video"
-		}
-		if isImageModelName(modelName) {
-			return "image"
-		}
-		if isAudioModelName(modelName) {
-			return "audio"
-		}
-		return "text"
+// classifyModelByChannel 根据渠道 Type、全局规则和启发式确定模型支持的类型列表。
+// 返回多个类型表示多模态模型（如 gpt-4o 既是 text 也是 image）。
+func classifyModelByChannel(modelName string, channel model.ModelChannel) []string {
+	// 1. 渠道显式 Type 优先级最高
+	if ct := channelModelType(channel); ct != "" {
+		return []string{ct}
 	}
+	// 2. 全局模型类型规则
+	cachedRulesMu.RLock()
+	rules := cachedModelTypeRules
+	cachedRulesMu.RUnlock()
+	if types := matchModelTypeRules(modelName, rules); len(types) > 0 {
+		return types
+	}
+	// 3. 关键词启发式兜底
+	return []string{heuristicModelType(modelName)}
+}
 
-	// collectChannelModelsByCapability 从渠道列表中收集指定能力类型的模型名。
-	func collectChannelModelsByCapability(channels []model.ModelChannel, capability string) []string {
-		result := []string{}
-		for _, channel := range channels {
-			if !channel.Enabled {
-				continue
-			}
-			for _, modelName := range channel.Models {
-				if classifyModel(modelName) == capability {
+// heuristicModelType 根据模型名关键词推断单一类型。
+func heuristicModelType(modelName string) string {
+	if isImageModelName(modelName) {
+		return "image"
+	}
+	if isVideoModelName(modelName) {
+		return "video"
+	}
+	if isAudioModelName(modelName) {
+		return "audio"
+	}
+	return "text"
+}
+
+// channelModelType 返回渠道的显式类型（空字符串表示未设置）。
+func channelModelType(channel model.ModelChannel) string {
+	switch strings.ToLower(strings.TrimSpace(channel.Type)) {
+	case "text", "image", "video", "audio":
+		return strings.ToLower(strings.TrimSpace(channel.Type))
+	default:
+		return ""
+	}
+}
+
+// collectChannelModelsByCapability 从渠道列表中收集指定能力类型的模型名。
+func collectChannelModelsByCapability(channels []model.ModelChannel, capability string) []string {
+	result := []string{}
+	for _, channel := range channels {
+		if !channel.Enabled {
+			continue
+		}
+		for _, modelName := range channel.Models {
+			for _, t := range classifyModelByChannel(modelName, channel) {
+				if t == capability {
 					result = append(result, strings.TrimSpace(modelName))
+					break
 				}
 			}
 		}
-		return uniqueModelNames(result)
 	}
+	return uniqueModelNames(result)
+}
+
+// --- 全局模型类型规则匹配 ---
+
+var (
+	cachedModelTypeRules model.ModelTypeRules
+	cachedRulesMu        sync.RWMutex
+)
+
+// refreshModelTypeRulesCache 在加载 settings 后刷新缓存的类型规则。
+func refreshModelTypeRulesCache(rules model.ModelTypeRules) {
+	cachedRulesMu.Lock()
+	cachedModelTypeRules = rules
+	cachedRulesMu.Unlock()
+}
+
+// matchModelTypeRules 检查模型名是否匹配全局类型规则，返回所有匹配的类型。
+func matchModelTypeRules(modelName string, rules model.ModelTypeRules) []string {
+	var types []string
+	if matchAnyPattern(modelName, rules.TextModels) {
+		types = append(types, "text")
+	}
+	if matchAnyPattern(modelName, rules.ImageModels) {
+		types = append(types, "image")
+	}
+	if matchAnyPattern(modelName, rules.VideoModels) {
+		types = append(types, "video")
+	}
+	if matchAnyPattern(modelName, rules.AudioModels) {
+		types = append(types, "audio")
+	}
+	return types
+}
+
+// matchAnyPattern 检查模型名是否匹配任意一行模式。
+// 支持：精确匹配、glob (* ?)、/regex/ 语法。
+func matchAnyPattern(modelName string, patternsText string) bool {
+	modelName = strings.TrimSpace(modelName)
+	if modelName == "" || strings.TrimSpace(patternsText) == "" {
+		return false
+	}
+	for _, pattern := range strings.Split(patternsText, "\n") {
+		pattern = strings.TrimSpace(pattern)
+		if pattern == "" {
+			continue
+		}
+		if matchSinglePattern(modelName, pattern) {
+			return true
+		}
+	}
+	return false
+}
+
+// matchSinglePattern 检查模型名是否匹配单个模式。
+func matchSinglePattern(modelName string, pattern string) bool {
+	// /regex/ 语法
+	if len(pattern) >= 2 && pattern[0] == '/' && pattern[len(pattern)-1] == '/' {
+		re, err := regexp.Compile(pattern[1 : len(pattern)-1])
+		if err != nil {
+			return false
+		}
+		return re.MatchString(modelName)
+	}
+	// glob (* → .* , ? → .) 或精确匹配
+	return globMatch(modelName, pattern)
+}
+
+// globMatch 简易 glob 匹配，支持 * 和 ? 通配符。
+func globMatch(s, pattern string) bool {
+	// 无通配符 → 精确匹配
+	if !strings.ContainsAny(pattern, "*?") {
+		return strings.EqualFold(s, pattern)
+	}
+	// 转义正则特殊字符，然后把 * → .* 和 ? → .
+	escaped := regexp.QuoteMeta(pattern)
+	escaped = strings.ReplaceAll(escaped, `\*`, ".*")
+	escaped = strings.ReplaceAll(escaped, `\?`, ".")
+	re, err := regexp.Compile("(?i)^" + escaped + "$")
+	if err != nil {
+		return false
+	}
+	return re.MatchString(s)
+}
 
 func normalizeModelChannel(channel model.ModelChannel) model.ModelChannel {
 	if channel.Protocol == "" {

@@ -16,6 +16,7 @@ type ModelChannel struct {
 	BaseURL  string   `json:"baseUrl"`
 	APIKey   string   `json:"apiKey"`
 	Models   []string `json:"models"`
+	Type     string   `json:"type"` // "", "text", "image", "video", "audio"；空表示自动检测
 	Weight   int      `json:"weight"`
 	Enabled  bool     `json:"enabled"`
 	Remark   string   `json:"remark"`
@@ -27,6 +28,14 @@ type ModelCost struct {
 	Credits int    `json:"credits"`
 }
 
+// ModelTypeRules 全局模型类型规则。每行一个匹配模式，支持 glob (*, ?) 和 /regex/。
+type ModelTypeRules struct {
+	TextModels  string `json:"textModels"`
+	ImageModels string `json:"imageModels"`
+	VideoModels string `json:"videoModels"`
+	AudioModels string `json:"audioModels"`
+}
+
 // PublicModelChannelSetting 公开模型渠道配置。
 type PublicModelChannelSetting struct {
 	AvailableModels    []string    `json:"availableModels"`
@@ -35,9 +44,10 @@ type PublicModelChannelSetting struct {
 	DefaultImageModel  string      `json:"defaultImageModel"`
 	DefaultVideoModel  string      `json:"defaultVideoModel"`
 	DefaultTextModel   string      `json:"defaultTextModel"`
-	DefaultAudioModel  string      `json:"defaultAudioModel"`
-	SystemPrompt       string      `json:"systemPrompt"`
-	AllowCustomChannel *bool       `json:"allowCustomChannel"`
+	DefaultAudioModel  string         `json:"defaultAudioModel"`
+	SystemPrompt       string         `json:"systemPrompt"`
+	AllowCustomChannel *bool          `json:"allowCustomChannel"`
+	ModelTypeRules     ModelTypeRules `json:"modelTypeRules"`
 }
 
 // PublicSetting 公开配置。

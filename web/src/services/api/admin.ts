@@ -162,9 +162,17 @@ export type AdminModelChannel = {
     baseUrl: string;
     apiKey: string;
     models: string[];
+    type: "" | "text" | "image" | "video" | "audio";
     weight: number;
     enabled: boolean;
     remark: string;
+};
+
+export type AdminModelTypeRules = {
+    textModels: string;
+    imageModels: string;
+    videoModels: string;
+    audioModels: string;
 };
 
 export type AdminPublicModelChannelSettings = {
@@ -177,6 +185,7 @@ export type AdminPublicModelChannelSettings = {
     defaultAudioModel: string;
     systemPrompt: string;
     allowCustomChannel: boolean;
+    modelTypeRules: AdminModelTypeRules;
 };
 
 export type AdminModelCost = {
