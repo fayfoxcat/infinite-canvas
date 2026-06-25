@@ -21,6 +21,7 @@ const resolutionOptions = [
 const DIMENSION_STEP = 16;
 
 const aspectOptions = [
+    { value: "auto", label: "auto", width: 1024, height: 1024, icon: "auto" },
     { value: "1:1", label: "1:1", width: 1024, height: 1024, icon: "square" },
     { value: "3:2", label: "3:2", width: 1536, height: 1024, icon: "landscape" },
     { value: "2:3", label: "2:3", width: 1024, height: 1536, icon: "portrait" },
@@ -28,7 +29,6 @@ const aspectOptions = [
     { value: "3:4", label: "3:4", width: 1024, height: 1360, icon: "portrait" },
     { value: "16:9", label: "16:9", width: 1824, height: 1024, icon: "landscape" },
     { value: "9:16", label: "9:16", width: 1024, height: 1824, icon: "portrait" },
-    { value: "auto", label: "auto", width: 0, height: 0, icon: "auto" },
 ];
 
 type ImageSettingsPanelProps = {
@@ -50,7 +50,7 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
     const activeSize = config.size || "auto";
     const activeAspect = normalizeImageSizeValue(activeSize);
     const selectedAspect = aspectOptions.find((item) => (item.size || item.value) === activeAspect || item.value === activeAspect);
-    const dimensions = resolveImageDisplayDimensions(activeSize, imageResolution, selectedAspect || aspectOptions[0]);
+    const dimensions = resolveImageDisplayDimensions(activeSize, imageResolution, selectedAspect || aspectOptions[1]);
     const selectAspect = (value: string) => {
         const option = aspectOptions.find((item) => item.value === value);
         onConfigChange("size", option?.size || option?.value || "auto");

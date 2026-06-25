@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, ArrowRight, BookOpen, CheckSquare, ChevronDown, Download, FolderPlus, History, ImagePlus, LoaderCircle, Minus, PenLine, Plus, SlidersHorizontal, Sparkles, Trash2, Upload } from "lucide-react";
+import { BookOpen, CheckSquare, ChevronDown, Download, FolderPlus, History, ImagePlus, LoaderCircle, Minus, PenLine, Plus, SlidersHorizontal, Sparkles, Trash2, Upload } from "lucide-react";
 import { type ClipboardEvent as ReactClipboardEvent, type DragEvent as ReactDragEvent, useEffect, useRef, useState } from "react";
 import { App, Button, Checkbox, Drawer, Image, Input, Modal, Popover, Tooltip, Typography } from "antd";
 import localforage from "localforage";
@@ -82,10 +82,12 @@ type LogFilter = "all" | GenerationMode;
 const LOG_STORE_KEY = "infinite-canvas:image_generation_logs";
 const RESULT_ACTION_BUTTON_CLASS = "min-w-0 px-1.5 [&_.ant-btn-icon]:shrink-0 [&>span:last-child]:min-w-0 [&>span:last-child]:truncate";
 const logStore = localforage.createInstance({ name: "infinite-canvas", storeName: "image_generation_logs" });
+type ViewportSize = { width: number; height: number };
 
 export default function ImagePage() {
     const { message } = App.useApp();
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const conversationViewportRef = useRef<HTMLDivElement>(null);
     const config = useConfigStore((state) => state.config);
     const effectiveConfig = useEffectiveConfig();
     const updateConfig = useConfigStore((state) => state.updateConfig);
@@ -107,6 +109,8 @@ export default function ImagePage() {
     const [previewLog, setPreviewLog] = useState<GenerationLog | null>(null);
     const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
     const [nowTick, setNowTick] = useState(Date.now());
+    const [conversationViewportSize, setConversationViewportSize] = useState<ViewportSize>({ width: 0, height: 0 });
+    const [draggingReferenceId, setDraggingReferenceId] = useState<string | null>(null);
 
     const model = effectiveConfig.imageModel || effectiveConfig.model;
     const generationCount = Math.max(1, Math.min(10, Number(config.count) || 1));
@@ -120,6 +124,19 @@ export default function ImagePage() {
         const timer = window.setInterval(() => setNowTick(Date.now()), 1000);
         return () => window.clearInterval(timer);
     }, [conversationTurns]);
+
+    useEffect(() => {
+        const element = conversationViewportRef.current;
+        if (!element) return;
+        const updateSize = () => {
+            const rect = element.getBoundingClientRect();
+            setConversationViewportSize({ width: rect.width, height: rect.height });
+        };
+        updateSize();
+        const observer = new ResizeObserver(updateSize);
+        observer.observe(element);
+        return () => observer.disconnect();
+    }, []);
 
     const addReferences = async (files?: FileList | null) => {
         const imageFiles = Array.from(files || []).filter((file) => file.type.startsWith("image/"));
@@ -274,6 +291,17 @@ export default function ImagePage() {
         setDeleteConfirmOpen(false);
     };
 
+    const startNewConversation = () => {
+        setActiveConversationId(null);
+        setPreviewLog(null);
+        setConversationTurns([]);
+        setPrompt("");
+        setReferences([]);
+        setGenerationMode("text");
+        setSelectedLogIds([]);
+        setLogsOpen(false);
+    };
+
     const saveLog = (log: GenerationLog) => {
         void logStore.setItem(log.id, serializeLog(log)).then(() => refreshLogs());
     };
@@ -353,6 +381,11 @@ export default function ImagePage() {
     };
 
     const referencesScrollable = references.length > 6;
+    const moveReferenceTo = (sourceId: string | null, targetId: string) => {
+        if (!sourceId || sourceId === targetId) return;
+        setReferences((value) => moveListItemTo(value, sourceId, targetId));
+        setDraggingReferenceId(null);
+    };
 
     return (
         <div className="flex h-full flex-col overflow-hidden bg-background text-foreground">
@@ -364,6 +397,7 @@ export default function ImagePage() {
                             selectedLogIds={selectedLogIds}
                             activeLogId={activeConversationId || previewLog?.id}
                             onSelectedLogIdsChange={setSelectedLogIds}
+                            onNewConversation={startNewConversation}
                             onDeleteSelected={() => setDeleteConfirmOpen(true)}
                             onPreviewLog={(log) => void previewGenerationLog(log)}
                         />
@@ -380,7 +414,7 @@ export default function ImagePage() {
                                     </Button>
                                 </div>
                             </div>
-                            <div className="min-h-0 flex-1 overflow-hidden">
+                            <div ref={conversationViewportRef} className="min-h-0 flex-1 overflow-hidden">
                                 {conversationTurns.length ? (
                                     <div className="thin-scrollbar flex h-full flex-col gap-4 overflow-y-auto p-4">
                                         {conversationTurns.map((turn) => (
@@ -392,6 +426,7 @@ export default function ImagePage() {
                                                 onDownload={downloadImage}
                                                 onSaveAsset={saveResultToAssets}
                                                 now={nowTick}
+                                                viewportSize={conversationViewportSize}
                                             />
                                         ))}
                                     </div>
@@ -435,21 +470,44 @@ export default function ImagePage() {
                                         event.currentTarget.scrollLeft += event.deltaY;
                                     }}
                                 >
-                                    {references.map((item, index) => (
-                                        <div key={item.id} className="group relative size-16 shrink-0 overflow-hidden rounded-lg border border-border bg-muted/40">
-                                            <img src={item.dataUrl} alt={item.name} className="size-full object-cover" />
-                                            <span className="absolute left-1 top-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] font-medium text-white">{imageReferenceLabel(index)}</span>
-                                            <ReferenceOrderButtons index={index} total={references.length} onMove={(offset) => setReferences((value) => moveListItem(value, index, offset))} />
-                                            <button
-                                                type="button"
-                                                className="absolute right-1 top-1 hidden size-5 items-center justify-center rounded bg-black/60 text-white group-hover:flex"
-                                                onClick={() => setReferences((value) => value.filter((ref) => ref.id !== item.id))}
-                                                aria-label="移除参考图"
+                                    <Image.PreviewGroup>
+                                        {references.map((item, index) => (
+                                            <div
+                                                key={item.id}
+                                                draggable
+                                                className={`group relative size-16 shrink-0 cursor-grab overflow-hidden rounded-lg border bg-muted/40 active:cursor-grabbing [&_.ant-image]:block [&_.ant-image]:overflow-hidden [&_.ant-image]:rounded-lg [&_.ant-image-img]:rounded-lg [&_.ant-image-mask]:rounded-lg ${draggingReferenceId === item.id ? "border-emerald-300 opacity-60" : "border-border"}`}
+                                                onDragStart={(event) => {
+                                                    setDraggingReferenceId(item.id);
+                                                    event.dataTransfer.effectAllowed = "move";
+                                                    event.dataTransfer.setData("text/plain", item.id);
+                                                }}
+                                                onDragOver={(event) => {
+                                                    if (!draggingReferenceId || draggingReferenceId === item.id) return;
+                                                    event.preventDefault();
+                                                    event.dataTransfer.dropEffect = "move";
+                                                }}
+                                                onDrop={(event) => {
+                                                    event.preventDefault();
+                                                    moveReferenceTo(event.dataTransfer.getData("text/plain") || draggingReferenceId, item.id);
+                                                }}
+                                                onDragEnd={() => setDraggingReferenceId(null)}
                                             >
-                                                <Trash2 className="size-3" />
-                                            </button>
-                                        </div>
-                                    ))}
+                                                <Image src={item.dataUrl} alt={item.name} width={64} height={64} className="!h-16 !w-16 !object-cover" />
+                                                <span className="pointer-events-none absolute left-1 top-1 z-10 rounded bg-black/60 px-1.5 py-0.5 text-[10px] font-medium text-white">{imageReferenceLabel(index)}</span>
+                                                <button
+                                                    type="button"
+                                                    className="absolute right-1 top-1 z-20 hidden size-5 items-center justify-center rounded bg-black/60 text-white group-hover:flex"
+                                                    onClick={(event) => {
+                                                        event.stopPropagation();
+                                                        setReferences((value) => value.filter((ref) => ref.id !== item.id));
+                                                    }}
+                                                    aria-label="移除参考图"
+                                                >
+                                                    <Trash2 className="size-3" />
+                                                </button>
+                                            </div>
+                                        ))}
+                                    </Image.PreviewGroup>
                                     <button type="button" className="grid size-16 shrink-0 place-items-center rounded-lg border border-dashed border-border bg-muted/40 text-muted-foreground transition hover:border-zinc-400 hover:bg-muted hover:text-foreground dark:hover:border-zinc-500" onClick={() => fileInputRef.current?.click()}>
                                         <Upload className="size-4" />
                                     </button>
@@ -489,7 +547,7 @@ export default function ImagePage() {
                                 <GenerationCountInput value={effectiveConfig.count} onChange={(value) => updateConfig("count", value)} />
                                 <div className="ml-auto flex flex-wrap items-center gap-2">
                                     <Button className="!h-9 !rounded-xl !bg-foreground !px-4 !text-sm !font-medium !text-background disabled:!bg-muted disabled:!text-muted-foreground" icon={<Sparkles className="size-4" />} loading={running} disabled={running} onClick={() => void generate()}>
-                                        生成
+                                        {generationMode === "image" ? "编辑" : "生成"}
                                     </Button>
                                 </div>
                             </div>
@@ -515,6 +573,7 @@ export default function ImagePage() {
                     selectedLogIds={selectedLogIds}
                     activeLogId={activeConversationId || previewLog?.id}
                     onSelectedLogIdsChange={setSelectedLogIds}
+                    onNewConversation={startNewConversation}
                     onDeleteSelected={() => setDeleteConfirmOpen(true)}
                     onPreviewLog={(log) => void previewGenerationLog(log)}
                 />
@@ -634,6 +693,7 @@ function ConversationTurnCard({
     onDownload,
     onSaveAsset,
     now,
+    viewportSize,
 }: {
     turn: ConversationTurn;
     onRetry: (turnId: string, index: number) => void;
@@ -641,6 +701,7 @@ function ConversationTurnCard({
     onDownload: (image: GeneratedImage, index: number) => void;
     onSaveAsset: (image: GeneratedImage, index: number, prompt: string) => void;
     now: number;
+    viewportSize: ViewportSize;
 }) {
     return (
         <article className="space-y-3">
@@ -652,27 +713,31 @@ function ConversationTurnCard({
                 <Typography.Paragraph className="!mb-0 whitespace-pre-wrap !text-sm !leading-6 !text-foreground">{turn.prompt}</Typography.Paragraph>
                 {turn.references.length ? (
                     <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
-                        {turn.references.map((reference, refIndex) => (
-                            <div key={reference.id} className="relative size-12 shrink-0 overflow-hidden rounded-lg bg-muted/40">
-                                <Image src={reference.dataUrl} alt={reference.name} width={48} height={48} className="!h-12 !w-12 !object-cover" preview={{ mask: false }} />
-                                <span className="pointer-events-none absolute left-1 top-1 rounded bg-black/60 px-1 py-0.5 text-[9px] font-medium text-white">{imageReferenceLabel(refIndex)}</span>
-                            </div>
-                        ))}
+                        <Image.PreviewGroup>
+                            {turn.references.map((reference, refIndex) => (
+                                <div key={reference.id} className="relative size-12 shrink-0 overflow-hidden rounded-lg bg-muted/40 [&_.ant-image]:block [&_.ant-image]:overflow-hidden [&_.ant-image]:rounded-lg [&_.ant-image-img]:rounded-lg [&_.ant-image-mask]:rounded-lg">
+                                    <Image src={reference.dataUrl} alt={reference.name} width={48} height={48} className="!h-12 !w-12 !object-cover" />
+                                    <span className="pointer-events-none absolute left-1 top-1 rounded bg-black/60 px-1 py-0.5 text-[9px] font-medium text-white">{imageReferenceLabel(refIndex)}</span>
+                                </div>
+                            ))}
+                        </Image.PreviewGroup>
                     </div>
                 ) : null}
             </div>
-            <div className="inline-flex max-w-[70%] rounded-2xl border border-border bg-muted/20 p-3">
-                <div className="flex w-fit max-w-full flex-wrap gap-4">
-                    {turn.results.map((result, resultIndex) =>
-                        result.status === "success" && result.image ? (
-                            <ResultImageCard key={result.id} image={result.image} index={resultIndex} model={turn.model} onEdit={onEdit} onDownload={onDownload} onSaveAsset={(image, itemIndex) => onSaveAsset(image, itemIndex, turn.prompt)} />
-                        ) : result.status === "failed" ? (
-                            <FailedImageCard key={result.id} error={result.error || "生成失败"} onRetry={() => onRetry(turn.id, resultIndex)} />
-                        ) : (
-                            <PendingImageCard key={result.id} startedAt={result.startedAt || turn.createdAt} now={now} />
-                        ),
-                    )}
-                </div>
+            <div className="inline-flex max-w-[80%] rounded-2xl border border-border bg-muted/20 p-3">
+                <Image.PreviewGroup>
+                    <div className="flex w-fit max-w-full flex-wrap gap-4">
+                        {turn.results.map((result, resultIndex) =>
+                            result.status === "success" && result.image ? (
+                                <ResultImageCard key={result.id} image={result.image} index={resultIndex} model={turn.model} viewportSize={viewportSize} onEdit={onEdit} onDownload={onDownload} onSaveAsset={(image, itemIndex) => onSaveAsset(image, itemIndex, turn.prompt)} />
+                            ) : result.status === "failed" ? (
+                                <FailedImageCard key={result.id} error={result.error || "生成失败"} onRetry={() => onRetry(turn.id, resultIndex)} />
+                            ) : (
+                                <PendingImageCard key={result.id} startedAt={result.startedAt || turn.createdAt} now={now} viewportSize={viewportSize} />
+                            ),
+                        )}
+                    </div>
+                </Image.PreviewGroup>
             </div>
         </article>
     );
@@ -682,6 +747,7 @@ function ResultImageCard({
     image,
     index,
     model,
+    viewportSize,
     onEdit,
     onDownload,
     onSaveAsset,
@@ -689,14 +755,15 @@ function ResultImageCard({
     image: GeneratedImage;
     index: number;
     model: string;
+    viewportSize: ViewportSize;
     onEdit: (image: GeneratedImage, index: number) => void;
     onDownload: (image: GeneratedImage, index: number) => void;
     onSaveAsset: (image: GeneratedImage, index: number) => void;
 }) {
-    const cardWidth = getResultCardWidth(image);
+    const cardSize = getResultCardSize(image, viewportSize);
 
     return (
-        <div className="min-w-0 max-w-full" style={{ width: cardWidth }}>
+        <div className="min-w-0 max-w-full" style={{ width: cardSize.width }}>
             <div className="overflow-hidden rounded-xl bg-muted/40 [&_.ant-image]:block [&_.ant-image]:overflow-hidden [&_.ant-image]:rounded-xl [&_.ant-image-img]:rounded-xl [&_.ant-image-mask]:rounded-xl">
                 <Image src={image.dataUrl} alt={`生成结果 ${index + 1}`} className="w-full object-contain" />
             </div>
@@ -731,10 +798,11 @@ function ResultImageCard({
     );
 }
 
-function PendingImageCard({ startedAt, now }: { startedAt?: number; now: number }) {
+function PendingImageCard({ startedAt, now, viewportSize }: { startedAt?: number; now: number; viewportSize: ViewportSize }) {
     const waitMs = startedAt ? Math.max(0, now - startedAt) : 0;
+    const size = getPendingCardSize(viewportSize);
     return (
-        <div className="relative aspect-square w-72 max-w-full overflow-hidden rounded-xl bg-muted/40">
+        <div className="relative aspect-square max-w-full overflow-hidden rounded-xl bg-muted/40" style={{ width: size }}>
             <div
                 className="absolute inset-0 opacity-60"
                 style={{
@@ -769,8 +837,19 @@ function FailedImageCard({ error, onRetry }: { error: string; onRetry: () => voi
     );
 }
 
-function getResultCardWidth(image: GeneratedImage) {
-    return Math.max(220, Math.min(430, Math.round(image.width * 0.42)));
+function getResultCardSize(image: GeneratedImage, viewportSize: ViewportSize) {
+    const maxWidth = Math.max(220, viewportSize.width ? viewportSize.width * 0.8 : 430);
+    const maxHeight = Math.max(220, viewportSize.height ? viewportSize.height * 0.8 : 430);
+    const width = image.width || 1024;
+    const height = image.height || 1024;
+    const scale = Math.min(maxWidth / width, maxHeight / height);
+    return { width: Math.max(220, Math.round(width * scale)) };
+}
+
+function getPendingCardSize(viewportSize: ViewportSize) {
+    const maxWidth = Math.max(220, viewportSize.width ? viewportSize.width * 0.8 : 288);
+    const maxHeight = Math.max(220, viewportSize.height ? viewportSize.height * 0.8 : 288);
+    return Math.round(Math.min(maxWidth, maxHeight));
 }
 
 function updateTurnResultAt(turns: ConversationTurn[], turnId: string, index: number, next: Partial<GenerationResult>) {
@@ -782,6 +861,7 @@ function LogPanel({
     selectedLogIds,
     activeLogId,
     onSelectedLogIdsChange,
+    onNewConversation,
     onDeleteSelected,
     onPreviewLog,
 }: {
@@ -789,6 +869,7 @@ function LogPanel({
     selectedLogIds: string[];
     activeLogId?: string;
     onSelectedLogIdsChange: (ids: string[]) => void;
+    onNewConversation: () => void;
     onDeleteSelected: () => void;
     onPreviewLog: (log: GenerationLog) => void;
 }) {
@@ -806,6 +887,9 @@ function LogPanel({
                 <div>
                     <h2 className="text-base font-semibold text-foreground">历史记录</h2>
                 </div>
+                <Button size="small" icon={<Plus className="size-3.5" />} onClick={onNewConversation}>
+                    新建对话
+                </Button>
             </div>
             <div className="mb-4 flex gap-2">
                 {[
@@ -1034,22 +1118,14 @@ function normalizeLogConfig(log: Partial<GenerationLog>): GenerationLogConfig {
     };
 }
 
-function moveListItem<T>(items: T[], index: number, offset: number) {
-    const targetIndex = index + offset;
-    if (targetIndex < 0 || targetIndex >= items.length) return items;
+function moveListItemTo<T extends { id: string }>(items: T[], sourceId: string, targetId: string) {
+    const sourceIndex = items.findIndex((item) => item.id === sourceId);
+    const targetIndex = items.findIndex((item) => item.id === targetId);
+    if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex) return items;
     const next = [...items];
-    [next[index], next[targetIndex]] = [next[targetIndex], next[index]];
+    const [source] = next.splice(sourceIndex, 1);
+    next.splice(targetIndex, 0, source);
     return next;
-}
-
-function ReferenceOrderButtons({ index, total, onMove }: { index: number; total: number; onMove: (offset: number) => void }) {
-    if (total <= 1) return null;
-    return (
-        <div className="absolute inset-x-1 bottom-1 flex justify-between">
-            <Button size="small" className="!h-6 !w-6 !min-w-6 !rounded-full !bg-card/85 !p-0 !shadow-sm" icon={<ArrowLeft className="size-3" />} disabled={index <= 0} onClick={() => onMove(-1)} />
-            <Button size="small" className="!h-6 !w-6 !min-w-6 !rounded-full !bg-card/85 !p-0 !shadow-sm" icon={<ArrowRight className="size-3" />} disabled={index >= total - 1} onClick={() => onMove(1)} />
-        </div>
-    );
 }
 
 function buildLog({ id, config, fallbackDurationMs, turns }: { id: string; config: GenerationLogConfig; fallbackDurationMs: number; turns: ConversationTurn[] }): GenerationLog {

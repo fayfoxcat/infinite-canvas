@@ -74,7 +74,7 @@ export const defaultConfig: AiConfig = {
     textModels: [],
     audioModels: [],
     quality: "auto",
-    size: "1:1",
+    size: "auto",
     imageResolution: "1k",
     count: "1",
     canvasImageCount: "3",
@@ -232,7 +232,7 @@ export const useConfigStore = create<ConfigStore>()(
                 const persistedState = (persisted || {}) as Partial<ConfigStore>;
                 const persistedConfig = (persistedState.config || {}) as Partial<AiConfig>;
                 const persistedWebdav = (persistedState.webdav || {}) as Partial<WebdavSyncConfig>;
-                const size = normalizeImageSizeValue(persistedConfig.size || defaultConfig.size);
+                const size = normalizeImageSizeValue(!persistedConfig.size || persistedConfig.size === "1:1" ? defaultConfig.size : persistedConfig.size);
                 const imageResolution = persistedConfig.imageResolution || inferImageResolutionFromSize(persistedConfig.size) || "1k";
                 const config = { ...defaultConfig, ...persistedConfig, size, imageResolution };
                 return {
