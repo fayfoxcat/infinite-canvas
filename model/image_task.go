@@ -11,6 +11,7 @@ type ImageTask struct {
 	RequestBody string `json:"-" gorm:"type:text"`
 	ContentType string `json:"-"`
 	ResultData  string `json:"resultData,omitempty" gorm:"type:text"`
+	ResultFiles string `json:"resultFiles,omitempty" gorm:"type:text"` // JSON array of relative file paths under data/images/
 	ErrorMsg    string `json:"errorMsg,omitempty" gorm:"type:text"`
 	Credits     int    `json:"credits"`
 	CreatedAt   string `json:"createdAt"`

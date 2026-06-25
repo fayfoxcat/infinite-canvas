@@ -69,14 +69,18 @@ func New() *gin.Engine {
 	api.HEAD("/media/references/:id", func(c *gin.Context) {
 		handler.ReferenceMedia(c.Writer, c.Request, c.Param("id"))
 	})
+	// 图片生成结果文件下载（无需认证，路径含 UUID 不可猜测）
+	api.GET("/media/generations/*filepath", func(c *gin.Context) {
+		handler.ServeGenerationImage(c.Writer, c.Request)
+	})
 	v1 := api.Group("/v1", middleware.UserAuth)
 	v1.POST("/images/generations", gin.WrapF(handler.AIImagesGenerations))
-		v1.GET("/images/generations/:id", func(c *gin.Context) {
-			handler.AIImageGenerationTask(c.Writer, c.Request, c.Param("id"))
-		})
-		v1.GET("/images/generations/:id/result", func(c *gin.Context) {
-			handler.AIImageGenerationResult(c.Writer, c.Request, c.Param("id"))
-		})
+	v1.GET("/images/generations/:id", func(c *gin.Context) {
+		handler.AIImageGenerationTask(c.Writer, c.Request, c.Param("id"))
+	})
+	v1.GET("/images/generations/:id/result", func(c *gin.Context) {
+		handler.AIImageGenerationResult(c.Writer, c.Request, c.Param("id"))
+	})
 	v1.POST("/images/edits", gin.WrapF(handler.AIImagesEdits))
 	v1.POST("/chat/completions", gin.WrapF(handler.AIChatCompletions))
 	v1.POST("/audio/speech", gin.WrapF(handler.AIAudioSpeech))

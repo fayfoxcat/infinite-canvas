@@ -375,7 +375,7 @@ export default function ImagePage() {
         }
     };
 
-    const retryResult = (turnId: string, index: number) => {
+    const retryResult = async (turnId: string, index: number) => {
         const turn = conversationTurns.find((item) => item.id === turnId);
         if (!turn) return;
         if (!isAiConfigReady(effectiveConfig, turn.model || model)) {
@@ -383,10 +383,27 @@ export default function ImagePage() {
             openConfigDialog(true);
             return;
         }
+        const conversationId = activeConversationId || previewLog?.id || nanoid();
         const snapshot = { text: turn.prompt, config: { ...effectiveConfig, model: turn.model || model, count: "1" }, references: turn.mode === "image" ? turn.references : [] };
         setPreviewLog(null);
-        setConversationTurns((value) => updateTurnResultAt(value, turnId, index, { status: "pending", startedAt: Date.now(), error: undefined, image: undefined }));
-        void runGenerationSlot(turnId, index, snapshot).catch(() => {});
+        setActiveConversationId(conversationId);
+        const pendingTurns = updateTurnResultAt(conversationTurns, turnId, index, { status: "pending", startedAt: Date.now(), error: undefined, image: undefined });
+        const retryLogConfig = { ...snapshot.config, count: String(turn.results.length || 1) };
+        setConversationTurns(pendingTurns);
+        saveLog(buildLog({ id: conversationId, config: retryLogConfig, fallbackDurationMs: 0, turns: pendingTurns }));
+        try {
+            const image = await runGenerationSlot(turnId, index, snapshot);
+            const stored = await uploadImage(image.dataUrl);
+            const storedImage = { ...image, dataUrl: stored.url, storageKey: stored.storageKey, width: stored.width, height: stored.height, bytes: stored.bytes, mimeType: stored.mimeType };
+            const nextTurns = updateTurnResultAt(pendingTurns, turnId, index, { status: "success", image: storedImage, error: undefined });
+            setConversationTurns(nextTurns);
+            saveLog(buildLog({ id: conversationId, config: retryLogConfig, fallbackDurationMs: storedImage.durationMs, turns: nextTurns }));
+            message.success("图片已生成");
+        } catch (error) {
+            const failedTurns = updateTurnResultAt(pendingTurns, turnId, index, { status: "failed", error: error instanceof Error ? error.message : "生成失败", image: undefined });
+            setConversationTurns(failedTurns);
+            saveLog(buildLog({ id: conversationId, config: retryLogConfig, fallbackDurationMs: 0, turns: failedTurns }));
+        }
     };
 
     const referencesScrollable = references.length > 6;
@@ -949,6 +966,8 @@ function LogCard({ log, selected, active, onSelectedChange, onClick }: { log: Ge
     const referenceThumbnails = (log.references || []).map((item) => item.dataUrl).filter(Boolean);
     const thumbnails = (resultThumbnails.length ? resultThumbnails : referenceThumbnails).slice(0, 4);
     const modeLabel = log.turns.some((turn) => turn.references.length > 0) ? "图生图" : "文生图";
+    const successCount = log.successCount ?? 0;
+    const failCount = log.failCount ?? 0;
 
     return (
         <button
@@ -985,10 +1004,10 @@ function LogCard({ log, selected, active, onSelectedChange, onClick }: { log: Ge
                             <LoaderCircle className="size-3 animate-spin" />
                             生成中
                         </span>
-                    ) : (
-                        <span className="rounded-md bg-muted px-1.5 py-1">成功 {log.successCount ?? log.imageCount}</span>
-                    )}
-                    {log.failCount ? <span className="rounded-md bg-red-50 px-1.5 py-1 text-red-500 dark:bg-red-950/30 dark:text-red-300">失败 {log.failCount}</span> : null}
+                    ) : null}
+                    <span className="rounded-md bg-muted px-1.5 py-1">成功 {successCount}</span>
+                    <span className="rounded-md bg-muted px-1.5 py-1">失败 {failCount}</span>
+                    <span className="rounded-md bg-muted px-1.5 py-1">成功率 {successRateLabel(successCount, failCount)}</span>
                     <span className="rounded-md bg-muted px-1.5 py-1">{formatDuration(log.durationMs)}</span>
                 </div>
             </div>
@@ -1043,7 +1062,9 @@ async function normalizeLog(log: Partial<GenerationLog>): Promise<GenerationLog>
     const images = storedImages.length ? storedImages : flattenTurnImages(fallbackTurns);
     const config = normalizeLogConfig(log);
     const latestTurn = fallbackTurns[fallbackTurns.length - 1];
-    const status = log.status || (hasPendingResults(fallbackTurns) ? "生成中" : "成功");
+    const status = hasPendingResults(fallbackTurns) ? "生成中" : images.length ? "成功" : "失败";
+    const failCount = countTurnFailures(fallbackTurns) || log.failCount || 0;
+    const imageCount = countTurnResults(fallbackTurns) || log.imageCount || images.length;
     return {
         id: log.id || nanoid(),
         createdAt: log.createdAt || Date.now(),
@@ -1054,9 +1075,9 @@ async function normalizeLog(log: Partial<GenerationLog>): Promise<GenerationLog>
         config,
         references: references.length ? references : latestTurn?.references || [],
         durationMs: log.durationMs || sumImageDuration(images),
-        successCount: log.successCount ?? images.length,
-        failCount: log.failCount ?? countTurnFailures(fallbackTurns),
-        imageCount: log.imageCount || countTurnResults(fallbackTurns) || images.length,
+        successCount: images.length,
+        failCount,
+        imageCount,
         size: log.size || config.size || "",
         quality: log.quality || config.quality || "",
         imageResolution: log.imageResolution || config.imageResolution || "",
@@ -1127,6 +1148,11 @@ function countTurnResults(turns: ConversationTurn[]) {
 
 function hasPendingResults(turns: ConversationTurn[]) {
     return turns.some((turn) => turn.results.some((result) => result.status === "pending"));
+}
+
+function successRateLabel(successCount: number, failCount: number) {
+    const total = successCount + failCount;
+    return total ? `${Math.round((successCount / total) * 100)}%` : "--";
 }
 
 function sumImageDuration(images: GeneratedImage[]) {

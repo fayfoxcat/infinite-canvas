@@ -9,6 +9,7 @@ import (
 	"mime"
 	"mime/multipart"
 	"net/http"
+	"path/filepath"
 	"strings"
 
 	"github.com/basketikun/infinite-canvas/model"
@@ -106,12 +107,69 @@ func AIImageGenerationResult(w http.ResponseWriter, r *http.Request, id string) 
 		Fail(w, "图片生成任务尚未完成")
 		return
 	}
+
+	// 优先从文件系统读取（新方式）
+	if task.ResultFiles != "" {
+		serveResultFromFiles(w, r, task)
+		return
+	}
+
+	// 兜底：旧的 base64 存 DB 方式
 	if task.ResultData == "" {
 		Fail(w, "图片生成结果为空")
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Write([]byte(task.ResultData))
+}
+
+// serveResultFromFiles 从文件路径构造带 URL 的 JSON 响应。
+func serveResultFromFiles(w http.ResponseWriter, r *http.Request, task model.ImageTask) {
+	var paths []string
+	if err := json.Unmarshal([]byte(task.ResultFiles), &paths); err != nil || len(paths) == 0 {
+		Fail(w, "图片生成结果为空")
+		return
+	}
+	baseURL := service.RequestOrigin(r)
+	var data []map[string]string
+	for _, p := range paths {
+		data = append(data, map[string]string{"url": baseURL + "/api/media/generations/" + p})
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"data": data})
+}
+
+// ServeGenerationImage 提供图片文件下载。
+func ServeGenerationImage(w http.ResponseWriter, r *http.Request) {
+	// URL 格式：/api/media/generations/2026/06/user-xxx/task-xxx-0.png
+	filePath := strings.TrimPrefix(r.URL.Path, "/api/media/generations/")
+	filePath = filepath.Clean(filePath)
+	if strings.Contains(filePath, "..") {
+		Fail(w, "非法路径")
+		return
+	}
+	imageDir := filepath.Join("data", "images")
+	fullPath := filepath.Join(imageDir, filePath)
+	// 安全检查：确保最终路径在 imageDir 内
+	absImageDir, _ := filepath.Abs(imageDir)
+	absFullPath, _ := filepath.Abs(fullPath)
+	if !strings.HasPrefix(absFullPath, absImageDir+string(filepath.Separator)) && absFullPath != absImageDir {
+		Fail(w, "非法路径")
+		return
+	}
+
+	ext := strings.ToLower(filepath.Ext(fullPath))
+	contentType := "image/png"
+	switch ext {
+	case ".jpg", ".jpeg":
+		contentType = "image/jpeg"
+	case ".webp":
+		contentType = "image/webp"
+	}
+
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	http.ServeFile(w, r, fullPath)
 }
 
 func proxyAIGetRequest(w http.ResponseWriter, r *http.Request, path string) {

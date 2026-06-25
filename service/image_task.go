@@ -3,10 +3,15 @@ package service
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -26,7 +31,6 @@ const (
 var imageTaskSem = make(chan struct{}, maxConcurrentImageTasks)
 
 // SubmitImageTask 创建异步图片生成任务，扣费后返回 task ID。
-// 如果并发池已满则返回错误。
 func SubmitImageTask(userID, modelName string, body []byte, contentType string, credits int) (string, error) {
 	// 扣费
 	if err := ConsumeUserCredits(userID, modelName, credits, "/images/generations"); err != nil {
@@ -51,15 +55,8 @@ func SubmitImageTask(userID, modelName string, body []byte, contentType string, 
 		return "", err
 	}
 
-	// 尝试获取并发槽位
-	select {
-	case imageTaskSem <- struct{}{}:
-		go executeImageTask(task.ID)
-	default:
-		// 并发池满，不是严重错误，任务已创建为 pending
-		// 后续轮询会发现任务仍在 pending 并重试
-		go executeImageTask(task.ID)
-	}
+	// 由 executeImageTask 内部控制并发，避免在提交路径上抢占槽位导致泄漏。
+	go executeImageTask(task.ID)
 
 	return task.ID, nil
 }
@@ -78,18 +75,12 @@ func GetImageTask(id string) (model.ImageTask, error) {
 
 // executeImageTask 在后台 goroutine 中执行图片生成。
 func executeImageTask(taskID string) {
-	// 确保信号量槽位释放
-	acquired := false
+	// 获取并发槽位；池满时阻塞等待。
 	select {
 	case imageTaskSem <- struct{}{}:
-		acquired = true
 	default:
-		// 未获取到槽位，等待
+		log.Printf("image task waiting for slot: taskID=%s", taskID)
 		imageTaskSem <- struct{}{}
-		acquired = true
-	}
-	if !acquired {
-		return
 	}
 
 	defer func() {
@@ -102,6 +93,7 @@ func executeImageTask(taskID string) {
 	// 加载任务
 	task, ok, err := repository.GetImageTaskByID(taskID)
 	if err != nil || !ok {
+		log.Printf("image task load failed: taskID=%s err=%v found=%v", taskID, err, ok)
 		return
 	}
 
@@ -153,9 +145,16 @@ func executeImageTask(taskID string) {
 		return
 	}
 
-	// 成功：存储结果
+	// 成功：保存图片到文件系统
+	resultFiles, saveErr := saveResultImages(task.ID, task.UserID, body)
+	if saveErr != nil {
+		log.Printf("image task save files failed, falling back to DB: taskID=%s err=%v", taskID, saveErr)
+		task.ResultData = string(body)
+	} else {
+		filesJSON, _ := json.Marshal(resultFiles)
+		task.ResultFiles = string(filesJSON)
+	}
 	task.Status = model.ImageTaskStatusCompleted
-	task.ResultData = string(body)
 	task.UpdatedAt = now()
 	_ = repository.UpdateImageTask(&task)
 }
@@ -170,6 +169,88 @@ func failImageTask(task *model.ImageTask, errMsg string, refund bool) {
 	}
 }
 
+const imageStorageDir = "data/images"
+
+// saveResultImages 将上游返回的图片数据写入文件系统。
+// 返回相对于 imageStorageDir 的文件路径列表。
+func saveResultImages(taskID, userID string, responseBody []byte) ([]string, error) {
+	var payload struct {
+		Data []struct {
+			B64JSON string `json:"b64_json"`
+			URL     string `json:"url"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(responseBody, &payload); err != nil {
+		return nil, err
+	}
+	if len(payload.Data) == 0 {
+		return nil, errors.New("response contains no image data")
+	}
+
+	now := time.Now()
+	dir := filepath.Join(imageStorageDir, now.Format("2006/01"), userID)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return nil, fmt.Errorf("mkdir: %w", err)
+	}
+
+	var files []string
+	for i, item := range payload.Data {
+		var imgBytes []byte
+
+		if item.B64JSON != "" {
+			var err error
+			imgBytes, err = base64.StdEncoding.DecodeString(item.B64JSON)
+			if err != nil {
+				log.Printf("image task decode base64 failed: taskID=%s index=%d err=%v", taskID, i, err)
+				continue
+			}
+		} else if item.URL != "" {
+			resp, err := http.Get(item.URL)
+			if err != nil {
+				log.Printf("image task download url failed: taskID=%s index=%d url=%s err=%v", taskID, i, item.URL, err)
+				continue
+			}
+			imgBytes, _ = io.ReadAll(io.LimitReader(resp.Body, 32<<20))
+			resp.Body.Close()
+		}
+
+		if len(imgBytes) == 0 {
+			continue
+		}
+
+		filename := fmt.Sprintf("%s-%d.png", taskID, i)
+		fullPath := filepath.Join(dir, filename)
+		if err := os.WriteFile(fullPath, imgBytes, 0644); err != nil {
+			log.Printf("image task write file failed: path=%s err=%v", fullPath, err)
+			continue
+		}
+		relPath := filepath.ToSlash(filepath.Join(now.Format("2006/01"), userID, filename))
+		files = append(files, relPath)
+	}
+
+	if len(files) == 0 {
+		return nil, errors.New("failed to save any image")
+	}
+	return files, nil
+}
+
+// deleteResultImageFiles 删除任务关联的图片文件。
+func deleteResultImageFiles(task model.ImageTask) {
+	if task.ResultFiles == "" {
+		return
+	}
+	var paths []string
+	if err := json.Unmarshal([]byte(task.ResultFiles), &paths); err != nil {
+		return
+	}
+	for _, p := range paths {
+		fullPath := filepath.Join(imageStorageDir, p)
+		if err := os.Remove(fullPath); err != nil && !os.IsNotExist(err) {
+			log.Printf("image task cleanup remove file failed: path=%s err=%v", fullPath, err)
+		}
+	}
+}
+
 // StartImageTaskCleaner 启动定时清理过期任务的后台协程。
 func StartImageTaskCleaner() {
 	go func() {
@@ -177,6 +258,9 @@ func StartImageTaskCleaner() {
 		defer ticker.Stop()
 		for range ticker.C {
 			cutoff := time.Now().Add(-imageTaskCleanupAge)
+			// 先删除过期任务的图片文件
+			cleanupStaleImageFiles(cutoff)
+			// 再删除数据库记录
 			deleted, err := repository.DeleteStaleImageTasks(cutoff)
 			if err != nil {
 				log.Printf("image task cleaner error: %v", err)
@@ -185,6 +269,19 @@ func StartImageTaskCleaner() {
 			}
 		}
 	}()
+}
+
+// cleanupStaleImageFiles 删除过期任务关联的图片文件。
+func cleanupStaleImageFiles(cutoff time.Time) {
+	db, err := repository.DB()
+	if err != nil {
+		return
+	}
+	var tasks []model.ImageTask
+	db.Where("created_at < ? AND result_files != ''", cutoff.Format(time.RFC3339)).Find(&tasks)
+	for _, task := range tasks {
+		deleteResultImageFiles(task)
+	}
 }
 
 func aiStatusMessageForCode(statusCode int) string {
