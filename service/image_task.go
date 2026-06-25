@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -29,6 +30,29 @@ const (
 
 // 并发控制信号量。
 var imageTaskSem = make(chan struct{}, maxConcurrentImageTasks)
+
+// imageTaskHTTPClient 使用独立 DNS resolver 直连 119.29.29.29（腾讯 DNSPod），
+// 避免容器继承宿主机路由器 DNS 时遭遇域名劫持（如返回 198.18.1.39 测试网段 IP）。
+var imageTaskHTTPClient = &http.Client{
+	Transport: &http.Transport{
+		DialContext: (&net.Dialer{
+			Timeout:   30 * time.Second,
+			KeepAlive: 30 * time.Second,
+			Resolver: &net.Resolver{
+				PreferGo: true,
+				Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+					d := net.Dialer{Timeout: 10 * time.Second}
+					// 直连 DNSPod 权威递归 DNS，不走路由器
+					return d.DialContext(ctx, "udp", "119.29.29.29:53")
+				},
+			},
+		}).DialContext,
+		TLSHandshakeTimeout:   15 * time.Second,
+		ResponseHeaderTimeout: 5 * time.Minute,
+		IdleConnTimeout:       90 * time.Second,
+	},
+	Timeout: imageTaskTimeout,
+}
 
 // SubmitImageTask 创建异步图片生成任务，扣费后返回 task ID。
 func SubmitImageTask(userID, modelName string, body []byte, contentType string, credits int) (string, error) {
@@ -102,6 +126,8 @@ func executeImageTask(taskID string) {
 	task.UpdatedAt = now()
 	_ = repository.UpdateImageTask(&task)
 
+	t0 := time.Now()
+
 	// 选择模型渠道
 	channel, err := SelectModelChannel(task.ModelName)
 	if err != nil {
@@ -126,14 +152,19 @@ func executeImageTask(taskID string) {
 		req.Header.Set("Content-Type", task.ContentType)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	log.Printf("image task http start: taskID=%s url=%s", taskID, url)
+	resp, err := imageTaskHTTPClient.Do(req)
+	httpElapsed := time.Since(t0)
 	if err != nil {
+		log.Printf("image task http error: taskID=%s elapsed=%v err=%v", taskID, httpElapsed, err)
 		failImageTask(&task, "上游接口无响应或网络不可达", true)
 		return
 	}
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(resp.Body)
+	readElapsed := time.Since(t0)
+	log.Printf("image task http done: taskID=%s http=%v read=%v status=%d bodyBytes=%d", taskID, httpElapsed, readElapsed, resp.StatusCode, len(body))
 
 	if resp.StatusCode >= http.StatusBadRequest {
 		detail := readUpstreamErrorDetail(body)
@@ -147,8 +178,9 @@ func executeImageTask(taskID string) {
 
 	// 成功：保存图片到文件系统
 	resultFiles, saveErr := saveResultImages(task.ID, task.UserID, body)
+	saveElapsed := time.Since(t0)
 	if saveErr != nil {
-		log.Printf("image task save files failed, falling back to DB: taskID=%s err=%v", taskID, saveErr)
+		log.Printf("image task save files failed, falling back to DB: taskID=%s elapsed=%v err=%v", taskID, saveElapsed, saveErr)
 		task.ResultData = string(body)
 	} else {
 		filesJSON, _ := json.Marshal(resultFiles)
@@ -157,6 +189,8 @@ func executeImageTask(taskID string) {
 	task.Status = model.ImageTaskStatusCompleted
 	task.UpdatedAt = now()
 	_ = repository.UpdateImageTask(&task)
+	totalElapsed := time.Since(t0)
+	log.Printf("image task completed: taskID=%s total=%v http=%v save=%v db=%v", taskID, totalElapsed, httpElapsed, saveElapsed, totalElapsed-saveElapsed)
 }
 
 func failImageTask(task *model.ImageTask, errMsg string, refund bool) {
@@ -205,7 +239,7 @@ func saveResultImages(taskID, userID string, responseBody []byte) ([]string, err
 				continue
 			}
 		} else if item.URL != "" {
-			resp, err := http.Get(item.URL)
+			resp, err := imageTaskHTTPClient.Get(item.URL)
 			if err != nil {
 				log.Printf("image task download url failed: taskID=%s index=%d url=%s err=%v", taskID, i, item.URL, err)
 				continue

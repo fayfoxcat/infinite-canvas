@@ -998,17 +998,21 @@ function LogCard({ log, selected, active, onSelectedChange, onClick }: { log: Ge
                         ) : null}
                     </div>
                 </div>
-                <div className="flex flex-col items-end gap-1 text-[11px] text-muted-foreground">
+                <div className="flex min-w-[176px] flex-col items-end gap-1 text-[11px] text-muted-foreground">
                     {log.status === "生成中" ? (
                         <span className="inline-flex items-center gap-1 rounded-md bg-emerald-50 px-1.5 py-1 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300">
                             <LoaderCircle className="size-3 animate-spin" />
                             生成中
                         </span>
                     ) : null}
-                    <span className="rounded-md bg-muted px-1.5 py-1">成功 {successCount}</span>
-                    <span className="rounded-md bg-muted px-1.5 py-1">失败 {failCount}</span>
-                    <span className="rounded-md bg-muted px-1.5 py-1">成功率 {successRateLabel(successCount, failCount)}</span>
-                    <span className="rounded-md bg-muted px-1.5 py-1">{formatDuration(log.durationMs)}</span>
+                    <span className="inline-flex max-w-full items-center gap-1 overflow-hidden rounded-md bg-muted px-1.5 py-1 leading-none">
+                        <span className="whitespace-nowrap">成功 {successCount}</span>
+                        <span className="text-muted-foreground/55">/</span>
+                        <span className="whitespace-nowrap">失败 {failCount}</span>
+                        <span className="text-muted-foreground/55">/</span>
+                        <span className="whitespace-nowrap">成功率 {successRateLabel(successCount, failCount)}</span>
+                    </span>
+                    <span className="rounded-md bg-muted px-1.5 py-1 leading-none">{formatDuration(log.durationMs)}</span>
                 </div>
             </div>
         </button>
