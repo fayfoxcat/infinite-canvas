@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
+import { inferImageResolutionFromSize, normalizeImageSizeValue } from "@/lib/image-size";
 import { apiGet } from "@/services/api/request";
 import type { AdminPublicSettings } from "@/services/api/admin";
 
@@ -32,6 +33,7 @@ export type AiConfig = {
     audioModels: string[];
     quality: string;
     size: string;
+    imageResolution: string;
     count: string;
     canvasImageCount: string;
 };
@@ -73,6 +75,7 @@ export const defaultConfig: AiConfig = {
     audioModels: [],
     quality: "auto",
     size: "1:1",
+    imageResolution: "1k",
     count: "1",
     canvasImageCount: "3",
 };
@@ -229,7 +232,9 @@ export const useConfigStore = create<ConfigStore>()(
                 const persistedState = (persisted || {}) as Partial<ConfigStore>;
                 const persistedConfig = (persistedState.config || {}) as Partial<AiConfig>;
                 const persistedWebdav = (persistedState.webdav || {}) as Partial<WebdavSyncConfig>;
-                const config = { ...defaultConfig, ...persistedConfig };
+                const size = normalizeImageSizeValue(persistedConfig.size || defaultConfig.size);
+                const imageResolution = persistedConfig.imageResolution || inferImageResolutionFromSize(persistedConfig.size) || "1k";
+                const config = { ...defaultConfig, ...persistedConfig, size, imageResolution };
                 return {
                     ...current,
                     webdav: { ...defaultWebdavSyncConfig, ...persistedWebdav },
@@ -246,6 +251,7 @@ export const useConfigStore = create<ConfigStore>()(
                         audioInstructions: config.audioInstructions || "",
                         videoSeconds: config.videoSeconds || "6",
                         vquality: config.vquality || "720",
+                        imageResolution: config.imageResolution || "1k",
                         videoGenerateAudio: config.videoGenerateAudio || "true",
                         videoWatermark: config.videoWatermark || "false",
                         canvasImageCount: config.canvasImageCount || "3",

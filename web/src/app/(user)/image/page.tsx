@@ -6,7 +6,7 @@ import { App, Button, Checkbox, Drawer, Image, Input, Modal, Popover, Tooltip, T
 import localforage from "localforage";
 import { saveAs } from "file-saver";
 
-import { ImageSettingsPanel, imageSizeLabel } from "@/components/image-settings-panel";
+import { ImageSettingsPanel, imageResolutionLabel, imageSizeLabel } from "@/components/image-settings-panel";
 import { ModelPicker } from "@/components/model-picker";
 import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
 import { AssetPickerModal, type InsertAssetPayload } from "@/app/(user)/canvas/components/asset-picker-modal";
@@ -20,6 +20,7 @@ import { requestEdit, requestGeneration } from "@/services/api/image";
 import { deleteStoredImages, resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { useAssetStore } from "@/stores/use-asset-store";
 import type { ReferenceImage } from "@/types/image";
+import { inferImageResolutionFromSize } from "@/lib/image-size";
 
 type GeneratedImage = {
     id: string;
@@ -35,6 +36,7 @@ type GeneratedImage = {
 type GenerationResult = {
     id: string;
     status: "pending" | "success" | "failed";
+    startedAt?: number;
     image?: GeneratedImage;
     error?: string;
 };
@@ -64,13 +66,14 @@ type GenerationLog = {
     imageCount: number;
     size: string;
     quality: string;
+    imageResolution: string;
     status: "成功" | "失败";
     images: GeneratedImage[];
     thumbnails: string[];
     turns: ConversationTurn[];
 };
 
-type GenerationLogConfig = Pick<AiConfig, "model" | "imageModel" | "quality" | "size" | "count">;
+type GenerationLogConfig = Pick<AiConfig, "model" | "imageModel" | "quality" | "size" | "imageResolution" | "count">;
 
 type UpdateAiConfig = <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
 type GenerationMode = "text" | "image";
@@ -103,6 +106,7 @@ export default function ImagePage() {
     const [selectedLogIds, setSelectedLogIds] = useState<string[]>([]);
     const [previewLog, setPreviewLog] = useState<GenerationLog | null>(null);
     const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+    const [nowTick, setNowTick] = useState(Date.now());
 
     const model = effectiveConfig.imageModel || effectiveConfig.model;
     const generationCount = Math.max(1, Math.min(10, Number(config.count) || 1));
@@ -110,6 +114,12 @@ export default function ImagePage() {
     useEffect(() => {
         void refreshLogs(true);
     }, []);
+
+    useEffect(() => {
+        if (!conversationTurns.some((turn) => turn.results.some((result) => result.status === "pending"))) return;
+        const timer = window.setInterval(() => setNowTick(Date.now()), 1000);
+        return () => window.clearInterval(timer);
+    }, [conversationTurns]);
 
     const addReferences = async (files?: FileList | null) => {
         const imageFiles = Array.from(files || []).filter((file) => file.type.startsWith("image/"));
@@ -155,7 +165,8 @@ export default function ImagePage() {
         const conversationId = activeConversationId || previewLog?.id || nanoid();
         const baseTurns = conversationTurns;
         const turnId = nanoid();
-        const pendingResults = Array.from({ length: generationCount }, () => ({ id: nanoid(), status: "pending" as const }));
+        const pendingStartedAt = Date.now();
+        const pendingResults = Array.from({ length: generationCount }, () => ({ id: nanoid(), status: "pending" as const, startedAt: pendingStartedAt }));
         const pendingTurn: ConversationTurn = {
             id: turnId,
             prompt: text,
@@ -163,11 +174,12 @@ export default function ImagePage() {
             mode: generationMode,
             references: snapshot.references,
             results: pendingResults,
-            createdAt: Date.now(),
+            createdAt: pendingStartedAt,
         };
         setActiveConversationId(conversationId);
         setConversationTurns([...baseTurns, pendingTurn]);
         setPrompt("");
+        setReferences([]);
         const batchStartedAt = performance.now();
 
         const tasks = Array.from({ length: generationCount }, (_, index) => runGenerationSlot(turnId, index, snapshot));
@@ -276,11 +288,13 @@ export default function ImagePage() {
         setPreviewLog(log);
         setActiveConversationId(log.id);
         setPrompt(refillPrompt ? log.prompt : "");
-        setReferences(log.references || []);
-        setGenerationMode(log.references?.length ? "image" : "text");
+        const restoredReferences = refillPrompt ? log.references || [] : [];
+        setReferences(restoredReferences);
+        setGenerationMode(restoredReferences.length ? "image" : "text");
         if (log.config.imageModel || log.model) updateConfig("imageModel", log.config.imageModel || log.model);
         if (log.config.quality) updateConfig("quality", log.config.quality);
         if (log.config.size) updateConfig("size", log.config.size);
+        if (log.config.imageResolution) updateConfig("imageResolution", log.config.imageResolution);
         if (log.config.count) updateConfig("count", log.config.count);
         setConversationTurns(log.turns);
     };
@@ -334,9 +348,11 @@ export default function ImagePage() {
         }
         const snapshot = { text: turn.prompt, config: { ...effectiveConfig, model: turn.model || model, count: "1" }, references: turn.mode === "image" ? turn.references : [] };
         setPreviewLog(null);
-        setConversationTurns((value) => updateTurnResultAt(value, turnId, index, { status: "pending", error: undefined, image: undefined }));
+        setConversationTurns((value) => updateTurnResultAt(value, turnId, index, { status: "pending", startedAt: Date.now(), error: undefined, image: undefined }));
         void runGenerationSlot(turnId, index, snapshot).catch(() => {});
     };
+
+    const referencesScrollable = references.length > 6;
 
     return (
         <div className="flex h-full flex-col overflow-hidden bg-background text-foreground">
@@ -375,6 +391,7 @@ export default function ImagePage() {
                                                 onEdit={addResultToReferences}
                                                 onDownload={downloadImage}
                                                 onSaveAsset={saveResultToAssets}
+                                                now={nowTick}
                                             />
                                         ))}
                                     </div>
@@ -411,9 +428,9 @@ export default function ImagePage() {
 
                             {references.length ? (
                                 <div
-                                    className="hover-scrollbar hover-scrollbar-hint mt-3 flex gap-2 overflow-x-auto pb-1"
+                                    className={`${referencesScrollable ? "hover-scrollbar hover-scrollbar-hint flex-nowrap overflow-x-auto" : "flex-wrap overflow-x-hidden"} mt-3 flex gap-2 pb-1`}
                                     onWheel={(event) => {
-                                        if (event.currentTarget.scrollWidth <= event.currentTarget.clientWidth) return;
+                                        if (!referencesScrollable || event.currentTarget.scrollWidth <= event.currentTarget.clientWidth) return;
                                         event.preventDefault();
                                         event.currentTarget.scrollLeft += event.deltaY;
                                     }}
@@ -465,7 +482,7 @@ export default function ImagePage() {
                                 >
                                     <Button className="!h-9 !rounded-xl !border-border !bg-muted/40 !px-3 !text-xs !font-medium !text-foreground !shadow-none hover:!bg-muted" icon={<SlidersHorizontal className="size-4" />}>
                                         {imageToolbarSizeLabel(effectiveConfig.size)}
-                                        <span className="ml-1 text-muted-foreground">{imageResolutionLabel(effectiveConfig.size)}</span>
+                                        <span className="ml-1 text-muted-foreground">{imageResolutionLabel(effectiveConfig.imageResolution)}</span>
                                         <ChevronDown className="ml-1 size-3.5" />
                                     </Button>
                                 </Popover>
@@ -610,25 +627,20 @@ function imageToolbarSizeLabel(size: string) {
     return size === "auto" ? "自动比例" : imageSizeLabel(size || "auto");
 }
 
-function imageResolutionLabel(size: string) {
-    const value = size || "auto";
-    if (value.includes("4k") || value.includes("3840")) return "4K";
-    if (value.includes("2k") || value.includes("2048")) return "2K";
-    return "1K";
-}
-
 function ConversationTurnCard({
     turn,
     onRetry,
     onEdit,
     onDownload,
     onSaveAsset,
+    now,
 }: {
     turn: ConversationTurn;
     onRetry: (turnId: string, index: number) => void;
     onEdit: (image: GeneratedImage, index: number) => void;
     onDownload: (image: GeneratedImage, index: number) => void;
     onSaveAsset: (image: GeneratedImage, index: number, prompt: string) => void;
+    now: number;
 }) {
     return (
         <article className="space-y-3">
@@ -642,8 +654,8 @@ function ConversationTurnCard({
                     <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
                         {turn.references.map((reference, refIndex) => (
                             <div key={reference.id} className="relative size-12 shrink-0 overflow-hidden rounded-lg bg-muted/40">
-                                <img src={reference.dataUrl} alt={reference.name} className="size-full object-cover" />
-                                <span className="absolute left-1 top-1 rounded bg-black/60 px-1 py-0.5 text-[9px] font-medium text-white">{imageReferenceLabel(refIndex)}</span>
+                                <Image src={reference.dataUrl} alt={reference.name} width={48} height={48} className="!h-12 !w-12 !object-cover" preview={{ mask: false }} />
+                                <span className="pointer-events-none absolute left-1 top-1 rounded bg-black/60 px-1 py-0.5 text-[9px] font-medium text-white">{imageReferenceLabel(refIndex)}</span>
                             </div>
                         ))}
                     </div>
@@ -657,7 +669,7 @@ function ConversationTurnCard({
                         ) : result.status === "failed" ? (
                             <FailedImageCard key={result.id} error={result.error || "生成失败"} onRetry={() => onRetry(turn.id, resultIndex)} />
                         ) : (
-                            <PendingImageCard key={result.id} />
+                            <PendingImageCard key={result.id} startedAt={result.startedAt || turn.createdAt} now={now} />
                         ),
                     )}
                 </div>
@@ -719,7 +731,8 @@ function ResultImageCard({
     );
 }
 
-function PendingImageCard() {
+function PendingImageCard({ startedAt, now }: { startedAt?: number; now: number }) {
+    const waitMs = startedAt ? Math.max(0, now - startedAt) : 0;
     return (
         <div className="relative aspect-square w-72 max-w-full overflow-hidden rounded-xl bg-muted/40">
             <div
@@ -732,6 +745,7 @@ function PendingImageCard() {
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-sm text-muted-foreground">
                 <LoaderCircle className="size-6 animate-spin" />
                 <span>生成中</span>
+                <span className="text-xs">等待 {formatDuration(waitMs)}</span>
             </div>
         </div>
     );
@@ -938,6 +952,7 @@ async function normalizeLog(log: Partial<GenerationLog>): Promise<GenerationLog>
         imageCount: log.imageCount || countTurnResults(fallbackTurns) || images.length,
         size: log.size || config.size || "",
         quality: log.quality || config.quality || "",
+        imageResolution: log.imageResolution || config.imageResolution || "",
         status: log.status || "成功",
         images,
         thumbnails: images.map((image) => image.dataUrl).filter(Boolean),
@@ -1008,11 +1023,13 @@ function sumImageDuration(images: GeneratedImage[]) {
 }
 
 function normalizeLogConfig(log: Partial<GenerationLog>): GenerationLogConfig {
+    const size = log.config?.size || log.size || "";
     return {
         model: log.config?.model || log.model || "",
         imageModel: log.config?.imageModel || log.model || "",
         quality: log.config?.quality || log.quality || "",
-        size: log.config?.size || log.size || "",
+        size,
+        imageResolution: log.config?.imageResolution || log.imageResolution || inferImageResolutionFromSize(size) || "1k",
         count: log.config?.count || String(log.imageCount || log.successCount || 1),
     };
 }
@@ -1045,6 +1062,7 @@ function buildLog({ id, config, fallbackDurationMs, turns }: { id: string; confi
         imageModel: config.imageModel,
         quality: config.quality,
         size: config.size,
+        imageResolution: config.imageResolution,
         count: config.count,
     };
     return {
@@ -1062,6 +1080,7 @@ function buildLog({ id, config, fallbackDurationMs, turns }: { id: string; confi
         imageCount: countTurnResults(turns) || images.length,
         size: logConfig.size,
         quality: logConfig.quality,
+        imageResolution: logConfig.imageResolution,
         status: images.length ? "成功" : "失败",
         images,
         thumbnails: images.map((image) => image.dataUrl).filter(Boolean),
