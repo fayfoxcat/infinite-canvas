@@ -67,7 +67,7 @@ type GenerationLog = {
     size: string;
     quality: string;
     imageResolution: string;
-    status: "成功" | "失败";
+    status: "成功" | "失败" | "生成中";
     images: GeneratedImage[];
     thumbnails: string[];
     turns: ConversationTurn[];
@@ -193,10 +193,19 @@ export default function ImagePage() {
             results: pendingResults,
             createdAt: pendingStartedAt,
         };
+        const pendingTurns = [...baseTurns, pendingTurn];
         setActiveConversationId(conversationId);
-        setConversationTurns([...baseTurns, pendingTurn]);
+        setConversationTurns(pendingTurns);
         setPrompt("");
         setReferences([]);
+        saveLog(
+            buildLog({
+                id: conversationId,
+                config: { ...snapshot.config, count: String(generationCount) },
+                fallbackDurationMs: 0,
+                turns: pendingTurns,
+            }),
+        );
         const batchStartedAt = performance.now();
 
         const tasks = Array.from({ length: generationCount }, (_, index) => runGenerationSlot(turnId, index, snapshot));
@@ -887,7 +896,7 @@ function LogPanel({
                 <div>
                     <h2 className="text-base font-semibold text-foreground">历史记录</h2>
                 </div>
-                <Button size="small" icon={<Plus className="size-3.5" />} onClick={onNewConversation}>
+                <Button className="!h-8 !rounded-lg !border-border !bg-muted/40 !px-3 !text-xs !font-medium !text-foreground !shadow-none hover:!bg-muted" size="small" icon={<Plus className="size-3.5" />} onClick={onNewConversation}>
                     新建对话
                 </Button>
             </div>
@@ -936,7 +945,9 @@ function LogPanel({
 }
 
 function LogCard({ log, selected, active, onSelectedChange, onClick }: { log: GenerationLog; selected: boolean; active: boolean; onSelectedChange: (checked: boolean) => void; onClick: () => void }) {
-    const thumbnails = (log.thumbnails || []).filter(Boolean).slice(0, 4);
+    const resultThumbnails = (log.thumbnails || []).filter(Boolean);
+    const referenceThumbnails = (log.references || []).map((item) => item.dataUrl).filter(Boolean);
+    const thumbnails = (resultThumbnails.length ? resultThumbnails : referenceThumbnails).slice(0, 4);
     const modeLabel = log.turns.some((turn) => turn.references.length > 0) ? "图生图" : "文生图";
 
     return (
@@ -956,16 +967,27 @@ function LogCard({ log, selected, active, onSelectedChange, onClick }: { log: Ge
                             <span>{log.time}</span>
                         </div>
                         {thumbnails.length ? (
-                            <div className="mt-2 flex gap-1 overflow-hidden">
-                                {thumbnails.map((image, index) => (
-                                    <img key={`${log.id}-${index}`} src={image} alt="" className="size-10 shrink-0 rounded-md object-cover" />
-                                ))}
-                            </div>
+                            <Image.PreviewGroup>
+                                <div className="mt-2 flex gap-1 overflow-hidden" onClick={(event) => event.stopPropagation()}>
+                                    {thumbnails.map((image, index) => (
+                                        <div key={`${log.id}-${index}`} className="size-10 shrink-0 overflow-hidden rounded-md bg-muted/40 [&_.ant-image]:block [&_.ant-image]:overflow-hidden [&_.ant-image]:rounded-md [&_.ant-image-img]:rounded-md [&_.ant-image-mask]:rounded-md">
+                                            <Image src={image} alt="" width={40} height={40} className="!h-10 !w-10 !object-cover" />
+                                        </div>
+                                    ))}
+                                </div>
+                            </Image.PreviewGroup>
                         ) : null}
                     </div>
                 </div>
                 <div className="flex flex-col items-end gap-1 text-[11px] text-muted-foreground">
-                    <span className="rounded-md bg-muted px-1.5 py-1">成功 {log.successCount ?? log.imageCount}</span>
+                    {log.status === "生成中" ? (
+                        <span className="inline-flex items-center gap-1 rounded-md bg-emerald-50 px-1.5 py-1 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300">
+                            <LoaderCircle className="size-3 animate-spin" />
+                            生成中
+                        </span>
+                    ) : (
+                        <span className="rounded-md bg-muted px-1.5 py-1">成功 {log.successCount ?? log.imageCount}</span>
+                    )}
                     {log.failCount ? <span className="rounded-md bg-red-50 px-1.5 py-1 text-red-500 dark:bg-red-950/30 dark:text-red-300">失败 {log.failCount}</span> : null}
                     <span className="rounded-md bg-muted px-1.5 py-1">{formatDuration(log.durationMs)}</span>
                 </div>
@@ -1021,6 +1043,7 @@ async function normalizeLog(log: Partial<GenerationLog>): Promise<GenerationLog>
     const images = storedImages.length ? storedImages : flattenTurnImages(fallbackTurns);
     const config = normalizeLogConfig(log);
     const latestTurn = fallbackTurns[fallbackTurns.length - 1];
+    const status = log.status || (hasPendingResults(fallbackTurns) ? "生成中" : "成功");
     return {
         id: log.id || nanoid(),
         createdAt: log.createdAt || Date.now(),
@@ -1037,7 +1060,7 @@ async function normalizeLog(log: Partial<GenerationLog>): Promise<GenerationLog>
         size: log.size || config.size || "",
         quality: log.quality || config.quality || "",
         imageResolution: log.imageResolution || config.imageResolution || "",
-        status: log.status || "成功",
+        status,
         images,
         thumbnails: images.map((image) => image.dataUrl).filter(Boolean),
         turns: fallbackTurns,
@@ -1102,6 +1125,10 @@ function countTurnResults(turns: ConversationTurn[]) {
     return turns.reduce((count, turn) => count + turn.results.length, 0);
 }
 
+function hasPendingResults(turns: ConversationTurn[]) {
+    return turns.some((turn) => turn.results.some((result) => result.status === "pending"));
+}
+
 function sumImageDuration(images: GeneratedImage[]) {
     return images.reduce((total, image) => total + (image.durationMs || 0), 0);
 }
@@ -1133,6 +1160,7 @@ function buildLog({ id, config, fallbackDurationMs, turns }: { id: string; confi
     const latestTurn = turns[turns.length - 1];
     const images = flattenTurnImages(turns);
     const failCount = countTurnFailures(turns);
+    const pending = hasPendingResults(turns);
     const logConfig = {
         model: config.model,
         imageModel: config.imageModel,
@@ -1157,7 +1185,7 @@ function buildLog({ id, config, fallbackDurationMs, turns }: { id: string; confi
         size: logConfig.size,
         quality: logConfig.quality,
         imageResolution: logConfig.imageResolution,
-        status: images.length ? "成功" : "失败",
+        status: pending ? "生成中" : images.length ? "成功" : "失败",
         images,
         thumbnails: images.map((image) => image.dataUrl).filter(Boolean),
         turns,
