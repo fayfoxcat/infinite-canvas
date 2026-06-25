@@ -247,3 +247,56 @@ export async function fetchChannelModels(token: string, payload: AdminChannelAct
 export async function testChannelModel(token: string, payload: AdminChannelActionRequest) {
     return apiPost<string>("/api/admin/settings/channel-test", payload, token);
 }
+
+// --- 模型管理 ---
+
+export type AdminModelInfo = {
+    id: number;
+    provider: string;
+    model: string;
+    displayName: string;
+    type: string;
+    maxSize: string;
+    callCount: number;
+    successCount: number;
+    sortOrder: number;
+    enabled: boolean;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type AdminModelInfoListResponse = {
+    items: AdminModelInfo[];
+    total: number;
+};
+
+export type AdminModelQuery = {
+    keyword?: string;
+    type?: string;
+    page?: number;
+    pageSize?: number;
+};
+
+export async function fetchAdminModels(token: string, query: AdminModelQuery = {}) {
+    return apiGet<AdminModelInfoListResponse>("/api/admin/models", compactApiParams(query as Record<string, string | string[] | number | number[] | undefined>), token);
+}
+
+export async function saveAdminModel(token: string, payload: Partial<AdminModelInfo>) {
+    return apiPost<AdminModelInfo>("/api/admin/models", payload, token);
+}
+
+export async function updateAdminModelSort(token: string, orders: { id: number; sortOrder: number }[]) {
+    return apiPost<boolean>("/api/admin/models/sort", { orders }, token);
+}
+
+export async function toggleAdminModel(token: string, id: number, enabled: boolean) {
+    return apiPost<boolean>(`/api/admin/models/${encodeURIComponent(id)}/toggle`, { enabled }, token);
+}
+
+export async function deleteAdminModel(token: string, id: number) {
+    return apiDelete<boolean>(`/api/admin/models/${encodeURIComponent(id)}`, token);
+}
+
+export async function syncAdminModels(token: string) {
+    return apiPost<{ synced: number }>("/api/admin/models/sync", {}, token);
+}

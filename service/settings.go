@@ -735,3 +735,51 @@ func modelChannelsForModel(channels []model.ModelChannel, modelName string) []mo
 	}
 	return result
 }
+
+// SyncModelInfos 从渠道模型列表同步到 model_infos 表。
+// 新模型自动创建，已存在的模型保留用户编辑的元数据。
+func SyncModelInfos(channels []model.ModelChannel) (int, error) {
+	existingModels, err := repository.AllModelInfoModels()
+	if err != nil {
+		return 0, err
+	}
+
+	synced := 0
+	for _, ch := range channels {
+		if !ch.Enabled {
+			continue
+		}
+		provider := ch.Name
+		if provider == "" {
+			provider = ch.BaseURL
+		}
+		for _, modelName := range ch.Models {
+			modelName = strings.TrimSpace(modelName)
+			if modelName == "" {
+				continue
+			}
+			if existingModels[modelName] {
+				continue // 已存在，保留用户编辑
+			}
+			types := classifyModelByChannel(modelName, ch)
+			modelType := "text"
+			if len(types) > 0 {
+				modelType = types[0]
+			}
+			info := model.ModelInfo{
+				Provider:    provider,
+				Model:       modelName,
+				DisplayName: modelName,
+				Type:        modelType,
+				MaxSize:     "",
+				Enabled:     true,
+			}
+			if err := repository.UpsertModelInfo(&info); err != nil {
+				return synced, err
+			}
+			existingModels[modelName] = true
+			synced++
+		}
+	}
+	return synced, nil
+}

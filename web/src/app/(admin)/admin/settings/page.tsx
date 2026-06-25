@@ -1,13 +1,16 @@
 "use client";
 
-import { CheckCircleOutlined, DeleteOutlined, FormatPainterOutlined, LoadingOutlined, PlusOutlined, ReloadOutlined, SaveOutlined } from "@ant-design/icons";
+import { CheckCircleOutlined, DeleteOutlined, FormatPainterOutlined, HolderOutlined, LoadingOutlined, PlusOutlined, ReloadOutlined, SaveOutlined, SyncOutlined } from "@ant-design/icons";
 import { json } from "@codemirror/lang-json";
-import { App, Button, Card, Checkbox, Col, Drawer, Flex, Form, Input, InputNumber, Modal, Row, Segmented, Select, Space, Switch, Table, Tabs, Tag, Typography } from "antd";
+import { App, Button, Card, Checkbox, Col, Drawer, Flex, Form, Input, InputNumber, message as antMessage, Modal, Row, Segmented, Select, Space, Switch, Table, Tabs, Tag, Typography } from "antd";
 import dynamic from "next/dynamic";
-import { useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { EditorView } from "@uiw/react-codemirror";
+import { DndContext, PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
+import { arrayMove, SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 
-import { fetchAdminSettings, fetchChannelModels, saveAdminSettings, testChannelModel, type AdminModelChannel, type AdminModelCost, type AdminSettings } from "@/services/api/admin";
+import { fetchAdminSettings, fetchChannelModels, saveAdminSettings, testChannelModel, type AdminModelChannel, type AdminModelCost, type AdminSettings, fetchAdminModels, saveAdminModel, updateAdminModelSort, toggleAdminModel, deleteAdminModel, syncAdminModels, type AdminModelInfo } from "@/services/api/admin";
 import { useUserStore } from "@/stores/use-user-store";
 
 const CodeMirror = dynamic(() => import("@uiw/react-codemirror"), { ssr: false });
@@ -48,7 +51,7 @@ const emptySettings: AdminSettings = {
 };
 const emptyChannel: AdminModelChannel = { protocol: "openai", name: "", baseUrl: "", apiKey: "", models: [], type: "", weight: 1, enabled: true, remark: "" };
 
-type SettingsTabKey = "public" | "private" | "general";
+type SettingsTabKey = "public" | "private" | "general" | "models";
 type EditorMode = "visual" | "json";
 type ModelSelectTabKey = "new" | "current";
 
@@ -57,8 +60,8 @@ export default function AdminSettingsPage() {
     const { message } = App.useApp();
     const [form] = Form.useForm<AdminSettings>();
     const [activeTab, setActiveTab] = useState<SettingsTabKey>("public");
-    const [editorMode, setEditorMode] = useState<Record<SettingsTabKey, EditorMode>>({ public: "visual", private: "visual", general: "visual" });
-    const [jsonText, setJsonText] = useState<Record<SettingsTabKey, string>>({ public: "", private: "", general: "" });
+    const [editorMode, setEditorMode] = useState<Record<SettingsTabKey, EditorMode>>({ public: "visual", private: "visual", general: "visual", models: "visual" });
+    const [jsonText, setJsonText] = useState<Record<SettingsTabKey, string>>({ public: "", private: "", general: "", models: "" });
     const [channels, setChannels] = useState<AdminModelChannel[]>([]);
     const [channelForm] = Form.useForm<AdminModelChannel>();
     const [editingChannelIndex, setEditingChannelIndex] = useState<number | null>(null);
@@ -93,6 +96,110 @@ export default function AdminSettingsPage() {
     }, [modelSelectGroups, modelSelectKeyword, modelSelectTab]);
     const activeSelectedCount = activeModelSelectModels.filter((model) => modelSelectSelected.includes(model)).length;
 
+    // --- 模型管理 state ---
+    const [modelsList, setModelsList] = useState<AdminModelInfo[]>([]);
+    const [modelsTotal, setModelsTotal] = useState(0);
+    const [modelsKeyword, setModelsKeyword] = useState("");
+    const [modelsTypeFilter, setModelsTypeFilter] = useState("");
+    const [modelsPage, setModelsPage] = useState(1);
+    const [modelsLoading, setModelsLoading] = useState(false);
+    const [modelsSyncing, setModelsSyncing] = useState(false);
+    const [editingModelId, setEditingModelId] = useState<number | null>(null);
+    const [editingModelData, setEditingModelData] = useState<Partial<AdminModelInfo>>({});
+    const pageSizeModels = 30;
+
+    const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+
+    const loadModels = async () => {
+        if (!token) return;
+        setModelsLoading(true);
+        try {
+            const res = await fetchAdminModels(token, { keyword: modelsKeyword, type: modelsTypeFilter, page: modelsPage, pageSize: pageSizeModels });
+            setModelsList(res.items);
+            setModelsTotal(res.total);
+        } catch {
+            // ignore
+        } finally {
+            setModelsLoading(false);
+        }
+    };
+
+    const handleSaveModel = async (record: AdminModelInfo) => {
+        if (!token) return;
+        try {
+            await saveAdminModel(token, record);
+            antMessage.success("已保存");
+            setEditingModelId(null);
+            void loadModels();
+        } catch (e) {
+            antMessage.error(e instanceof Error ? e.message : "保存失败");
+        }
+    };
+
+    const handleToggleModel = async (id: number, enabled: boolean) => {
+        if (!token) return;
+        try {
+            await toggleAdminModel(token, id, enabled);
+            void loadModels();
+        } catch {
+            // ignore
+        }
+    };
+
+    const handleDeleteModel = async (id: number, modelName: string) => {
+        if (!token) return;
+        Modal.confirm({
+            title: "删除模型",
+            content: `确认删除模型 "${modelName}"？`,
+            okText: "删除",
+            okType: "danger",
+            cancelText: "取消",
+            onOk: async () => {
+                await deleteAdminModel(token, id);
+                antMessage.success("已删除");
+                void loadModels();
+            },
+        });
+    };
+
+    const handleSyncModels = async () => {
+        if (!token) return;
+        setModelsSyncing(true);
+        try {
+            const res = await syncAdminModels(token);
+            antMessage.success(`同步完成，新增 ${res.synced} 个模型`);
+            void loadModels();
+        } catch (e) {
+            antMessage.error(e instanceof Error ? e.message : "同步失败");
+        } finally {
+            setModelsSyncing(false);
+        }
+    };
+
+    const handleDragEnd = async (event: DragEndEvent) => {
+        const { active, over } = event;
+        if (!over || active.id === over.id) return;
+        const oldIndex = modelsList.findIndex((m) => m.id === active.id);
+        const newIndex = modelsList.findIndex((m) => m.id === over.id);
+        if (oldIndex === -1 || newIndex === -1) return;
+        const reordered = arrayMove(modelsList, oldIndex, newIndex);
+        setModelsList(reordered);
+        const orders = reordered.map((m, i) => ({ id: m.id, sortOrder: i }));
+        if (!token) return;
+        try {
+            await updateAdminModelSort(token, orders);
+        } catch {
+            void loadModels();
+        }
+    };
+
+    useEffect(() => {
+        if (activeTab === "models") void loadModels();
+    }, [activeTab, modelsPage, modelsKeyword, modelsTypeFilter, token]);
+
+    const MODEL_SIZE_OPTIONS = ["auto", "1024x1024", "1792x1024", "1024x1792", "2048x2048", "2880x1920", "1920x2880"];
+    const MODEL_TYPE_OPTIONS = ["text", "image", "video", "audio"];
+
     const loadSettings = async () => {
         if (!token) return;
         setIsLoading(true);
@@ -106,6 +213,7 @@ export default function AdminSettingsPage() {
                 public: JSON.stringify(data.public, null, 2),
                 private: JSON.stringify(data.private, null, 2),
                 general: JSON.stringify(data.public, null, 2),
+                models: "",
             });
         } catch (error) {
             message.error(error instanceof Error ? error.message : "读取设置失败");
@@ -140,6 +248,7 @@ export default function AdminSettingsPage() {
                 public: JSON.stringify(merged.public, null, 2),
                 private: JSON.stringify(merged.private, null, 2),
                 general: JSON.stringify(merged.public, null, 2),
+                models: "",
             });
             message.success("已保存");
         } catch (error) {
@@ -361,6 +470,8 @@ export default function AdminSettingsPage() {
         setJsonText({
             public: JSON.stringify(merged.public, null, 2),
             private: JSON.stringify(merged.private, null, 2),
+            general: "",
+            models: "",
         });
         message.success("已保存");
     }
@@ -377,6 +488,7 @@ export default function AdminSettingsPage() {
                                 { key: "public", label: "公开配置（对外暴露）" },
                                 { key: "private", label: "私有配置（不会对外暴露）" },
                                 { key: "general", label: "通用配置（模型类型规则）" },
+                                { key: "models", label: "模型管理" },
                             ]}
                         />
                         <Space>
@@ -535,6 +647,132 @@ export default function AdminSettingsPage() {
                                 </Col>
                             </Row>
                         </Form>
+                    ) : activeTab === "models" ? (
+                        <Flex vertical gap={16}>
+                            <Flex justify="space-between" align="center" gap={12} wrap>
+                                <Space>
+                                    <Input.Search
+                                        placeholder="搜索服务商 / 模型 / 显示名称"
+                                        value={modelsKeyword}
+                                        onChange={(e) => { setModelsKeyword(e.target.value); setModelsPage(1); }}
+                                        allowClear
+                                        style={{ width: 280 }}
+                                    />
+                                    <Select
+                                        placeholder="类型筛选"
+                                        value={modelsTypeFilter || undefined}
+                                        onChange={(v) => { setModelsTypeFilter(v || ""); setModelsPage(1); }}
+                                        allowClear
+                                        style={{ width: 120 }}
+                                        options={MODEL_TYPE_OPTIONS.map((t) => ({ label: t, value: t }))}
+                                    />
+                                </Space>
+                                <Space>
+                                    <Button icon={<SyncOutlined />} loading={modelsSyncing} onClick={() => void handleSyncModels()}>
+                                        从渠道同步
+                                    </Button>
+                                    <Button type="primary" icon={<PlusOutlined />} onClick={() => {
+                                        setEditingModelId(-1);
+                                        setEditingModelData({ provider: "", model: "", displayName: "", type: "text", maxSize: "", enabled: true });
+                                    }}>
+                                        新增模型
+                                    </Button>
+                                </Space>
+                            </Flex>
+                            <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
+                                <SortableContext items={modelsList.map((m) => m.id)} strategy={verticalListSortingStrategy}>
+                                    <Table
+                                        rowKey="id"
+                                        loading={modelsLoading}
+                                        dataSource={modelsList}
+                                        pagination={{ current: modelsPage, pageSize: pageSizeModels, total: modelsTotal, onChange: (p) => setModelsPage(p), showSizeChanger: false, showTotal: (t) => `共 ${t} 个模型` }}
+                                        scroll={{ x: 1100 }}
+                                        components={{
+                                            body: { row: DraggableRow as any },
+                                        }}
+                                        onRow={(record) => ({ "data-row-key": record.id } as any)}
+                                        columns={[
+                                            { title: "#", width: 50, render: (_, __, i) => (modelsPage - 1) * pageSizeModels + i + 1 },
+                                            {
+                                                title: "服务商", dataIndex: "provider", width: 120,
+                                                render: (value: string, record) => editingModelId === record.id ? (
+                                                    <Input size="small" value={editingModelData.provider ?? value} onChange={(e) => setEditingModelData({ ...editingModelData, provider: e.target.value })} />
+                                                ) : (value || "-"),
+                                            },
+                                            {
+                                                title: "模型", dataIndex: "model", width: 180,
+                                                render: (value: string, record) => editingModelId === record.id ? (
+                                                    <Input size="small" value={editingModelData.model ?? value} onChange={(e) => setEditingModelData({ ...editingModelData, model: e.target.value })} />
+                                                ) : <Typography.Text code>{value}</Typography.Text>,
+                                            },
+                                            {
+                                                title: "显示名称", dataIndex: "displayName", width: 160,
+                                                render: (value: string, record) => editingModelId === record.id ? (
+                                                    <Input size="small" value={editingModelData.displayName ?? value} onChange={(e) => setEditingModelData({ ...editingModelData, displayName: e.target.value })} />
+                                                ) : (value || record.model),
+                                            },
+                                            {
+                                                title: "类型", dataIndex: "type", width: 90,
+                                                render: (value: string, record) => editingModelId === record.id ? (
+                                                    <Select size="small" value={editingModelData.type ?? value} onChange={(v) => setEditingModelData({ ...editingModelData, type: v })} options={MODEL_TYPE_OPTIONS.map((t) => ({ label: t, value: t }))} style={{ width: 90 }} />
+                                                ) : <Tag color={typeColor(value)}>{value || "text"}</Tag>,
+                                            },
+                                            {
+                                                title: "最大尺寸", dataIndex: "maxSize", width: 140,
+                                                render: (value: string, record) => {
+                                                    const isImage = (editingModelId === record.id ? ((editingModelData.type ?? record.type)) : record.type) === "image";
+                                                    if (!isImage) return <Typography.Text type="secondary">-</Typography.Text>;
+                                                    if (editingModelId === record.id) {
+                                                        return <Select size="small" value={(editingModelData.maxSize ?? value) || "auto"} onChange={(v) => setEditingModelData({ ...editingModelData, maxSize: v })} options={MODEL_SIZE_OPTIONS.map((s) => ({ label: s, value: s }))} style={{ width: 130 }} />;
+                                                    }
+                                                    return value || "auto";
+                                                },
+                                            },
+                                            { title: "调用次数", dataIndex: "callCount", width: 90, align: "right" as const, render: (v: number) => v.toLocaleString() },
+                                            {
+                                                title: "成功率", dataIndex: "successCount", width: 80, align: "right" as const,
+                                                render: (v: number, record) => record.callCount > 0 ? `${((v / record.callCount) * 100).toFixed(1)}%` : "-",
+                                            },
+                                            {
+                                                title: "排序", width: 50, align: "center" as const,
+                                                render: () => <HolderOutlined style={{ cursor: "grab", color: "var(--ant-color-text-tertiary)" }} />,
+                                            },
+                                            {
+                                                title: "操作", width: 120, fixed: "right" as const,
+                                                render: (_, record) => (
+                                                    <Space size={4}>
+                                                        {editingModelId === record.id ? (
+                                                            <>
+                                                                <Button size="small" type="primary" onClick={() => handleSaveModel({ ...record, ...editingModelData })}>保存</Button>
+                                                                <Button size="small" onClick={() => setEditingModelId(null)}>取消</Button>
+                                                            </>
+                                                        ) : (
+                                                            <>
+                                                                <Switch size="small" checked={record.enabled} onChange={(v) => handleToggleModel(record.id, v)} />
+                                                                <Button size="small" type="link" onClick={() => { setEditingModelId(record.id); setEditingModelData({}); }}>编辑</Button>
+                                                                <Button size="small" type="link" danger onClick={() => handleDeleteModel(record.id, record.model)}>删除</Button>
+                                                            </>
+                                                        )}
+                                                    </Space>
+                                                ),
+                                            },
+                                        ]}
+                                    />
+                                </SortableContext>
+                            </DndContext>
+                            {editingModelId === -1 && (
+                                <Card size="small" title="新增模型">
+                                    <Space direction="vertical" style={{ width: "100%" }}>
+                                        <Input placeholder="服务商" value={editingModelData.provider ?? ""} onChange={(e) => setEditingModelData({ ...editingModelData, provider: e.target.value })} />
+                                        <Input placeholder="模型名称" value={editingModelData.model ?? ""} onChange={(e) => setEditingModelData({ ...editingModelData, model: e.target.value })} />
+                                        <Input placeholder="显示名称（默认同模型名）" value={editingModelData.displayName ?? ""} onChange={(e) => setEditingModelData({ ...editingModelData, displayName: e.target.value })} />
+                                        <Select placeholder="类型" value={editingModelData.type ?? "text"} onChange={(v) => setEditingModelData({ ...editingModelData, type: v })} options={MODEL_TYPE_OPTIONS.map((t) => ({ label: t, value: t }))} />
+                                        <Button type="primary" onClick={() => handleSaveModel(editingModelData as AdminModelInfo)}>创建</Button>
+                                        <Button onClick={() => setEditingModelId(null)}>取消</Button>
+                                    </Space>
+                                </Card>
+                            )}
+                        </Flex>
                     ) : activeMode === "visual" ? (
                         <Form form={form} layout="vertical" initialValues={emptySettings} requiredMark={false}>
                             <Flex vertical gap={12}>
@@ -875,6 +1113,27 @@ export default function AdminSettingsPage() {
     );
 }
 
+// DraggableRow — @dnd-kit sortable table row
+import type { UniqueIdentifier } from "@dnd-kit/core";
+
+function DraggableRow({ children, ...props }: { children: ReactNode; [key: string]: any }) {
+    const dataId = props["data-row-key"];
+    const id: UniqueIdentifier = typeof dataId === "number" ? dataId : String(dataId ?? "");
+    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+    const style: React.CSSProperties = {
+        ...props.style,
+        transform: CSS.Transform.toString(transform),
+        transition,
+        ...(isDragging ? { position: "relative", zIndex: 9999, opacity: 0.8, background: "var(--ant-color-bg-container)" } : {}),
+    };
+    return <tr {...props} ref={setNodeRef} style={style} {...attributes} {...listeners}>{children}</tr>;
+}
+
+function typeColor(type: string) {
+    const map: Record<string, string> = { text: "blue", image: "purple", video: "orange", audio: "green" };
+    return map[type] || "default";
+}
+
 function normalizeSettings(settings: Partial<AdminSettings> = {}): AdminSettings {
     const privateSetting = normalizePrivateSetting(settings.private);
     return {
@@ -994,9 +1253,9 @@ function modelSummary(models: string[]) {
 
 function parseTabJson(tab: "public", value: string): AdminSettings["public"] | null;
 function parseTabJson(tab: "private", value: string): AdminSettings["private"] | null;
-function parseTabJson(tab: "general", value: string): AdminSettings["public"] | null;
-function parseTabJson(tab: SettingsTabKey, value: string): AdminSettings[SettingsTabKey] | null;
-function parseTabJson(tab: SettingsTabKey, value: string): AdminSettings[SettingsTabKey] | null {
+function parseTabJson(tab: "general" | "models", value: string): AdminSettings["public"] | null;
+function parseTabJson(tab: SettingsTabKey, value: string): any;
+function parseTabJson(tab: SettingsTabKey, value: string): any {
     try {
         if (tab === "private") {
             return normalizePrivateSetting(JSON.parse(value) as Partial<AdminSettings["private"]>);

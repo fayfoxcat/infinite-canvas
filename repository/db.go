@@ -70,6 +70,7 @@ func DB() (*gorm.DB, error) {
 			&model.Asset{},
 			&model.Setting{},
 			&model.ImageTask{},
+			&model.ModelInfo{},
 		)
 	})
 	return db, dbErr
