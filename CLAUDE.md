@@ -1,7 +1,38 @@
 # Infinite Canvas — AI Agent Onboarding
 
-> 本文档供其他 AI Agent / 协作者快速理解项目结构、环境信息和部署操作。
-> 最后更新：2026-06-24
+> 最后更新：2026-06-26
+
+---
+
+## 分支策略
+
+| 分支 | 用途 | 说明 |
+|------|------|------|
+| `main` | 上游分支 | 上游已抛弃后端，改为纯前端项目；仅作历史参考，不在此分支开发 |
+| `master` | 生产主分支 | 后端运行在 NAS (`nas.asac.cc`)，前端部署 Cloudflare Pages；本地调试前端连 NAS 后端 |
+| `dev` | 开发分支 | 后端在 WSL 内运行，前端在 Windows 宿主机运行（:3333 连 WSL 后端） |
+
+### 各分支启动命令
+
+**master 分支（前端调试，连 NAS 后端）：**
+```bash
+cd web
+NEXT_PUBLIC_API_BASE_URL="https://api.asac.cc" bun run dev -p 3000
+# 访问 http://localhost:3000
+# 提交 master → GitHub → Cloudflare Pages 自动部署
+```
+
+**dev 分支（全栈开发，后端 WSL + 前端 Windows）：**
+```bash
+# 后端（WSL 内）
+cd /mnt/c/Users/root/Documents/project/github/infinite-canvas
+go run .
+
+# 前端（Windows 宿主机 PowerShell）
+cd web
+$env:NEXT_PUBLIC_API_BASE_URL="http://127.0.0.1:8080"; bun run dev -p 3333
+# 访问 http://localhost:3333
+```
 
 ---
 
@@ -12,10 +43,7 @@
 | 仓库 | `github.com/fayfoxcat/infinite-canvas` |
 | 版本 | `v0.2.5` |
 | 许可证 | AGPL-3.0 |
-| 分支策略 | `main`（稳定）← PR ← `dev`（开发） |
-| CI/CD | GitHub Actions → Docker 镜像 → NAS 部署；前端 push 触发 Cloudflare Pages 自动构建 |
-
-**功能**：AI 图片生成 / 视频生成 / 对话 / TTS 的统一画布应用，集成模型渠道管理、算力点计费、提示词库。
+| 功能 | AI 图片生成 / 视频生成 / 对话 / TTS 的统一画布应用 |
 
 ---
 
@@ -23,12 +51,11 @@
 
 | 层 | 技术 |
 |---|---|
-| 后端 | Go 1.25, Gin v1.11, GORM v1.31, SQLite (默认) / MySQL / PostgreSQL |
+| 后端 | Go 1.25, Gin v1.11, GORM v1.31, SQLite |
 | 前端 | Next.js 16.2 (App Router), React 19.2, TypeScript 5, Ant Design 6.4, Zustand 5, TanStack Query 5 |
-| 文档站 | Next.js 16.2 + Fumadocs 16.9 |
 | 包管理 | bun (前端), go mod (后端) |
 | 容器化 | Docker + Docker Compose |
-| 镜像仓库 | GitHub Container Registry (`ghcr.io/basketikun/infinite-canvas`) 和 Docker Hub (`fairyfox/infinite-canvas-api`) |
+| 镜像仓库 | Docker Hub (`fairyfox/infinite-canvas-api`) |
 
 ---
 
@@ -38,163 +65,46 @@
 浏览器 (image.asac.cc)
   │
   ├── Cloudflare Pages（前端静态文件 CDN）
-  │     SPA 回退: /canvas/* → /canvas/_/ 200
-  │     SSL: Cloudflare 自动 HTTPS
   │
   └── HTTPS api.asac.cc
         └── Cloudflare DNS Proxy (Flexible SSL, Origin Rule → :8080)
               └── NAS Docker (network_mode: host)
                     └── Go 后端 :8080
-                          ├── /api/v1/* → One API（上游 AI 代理）
-                          ├── /webdav-proxy → WebDAV
+                          ├── /api/v1/* → 上游 AI 代理
+                          ├── /api/media/generations/* → 图片文件下载
                           └── SQLite: ./data/infinite-canvas.db
 ```
-
-### Cloudflare 配置
-
-| 配置项 | 值 |
-|---|---|
-| DNS | `api.asac.cc` → AAAA 记录 → NAS IPv6（橙色云代理） |
-| Origin Rules | `api.asac.cc` → 端口 8080 |
-| SSL/TLS | Flexible（浏览器→CF HTTPS，CF→NAS HTTP） |
-| 限制 | **100 秒代理超时**——图片生成已改为后端异步轮询模式 |
 
 ---
 
 ## 服务器信息
 
-### NAS（后端运行环境）
-
 | 属性 | 值 |
 |---|---|
-| 地址 | `nas.asac.cc` |
-| 用户 | `root` |
+| NAS 地址 | `nas.asac.cc` (root) |
 | 部署目录 | `/vol1/1000/docker-compose/image/` |
 | Compose 文件 | `docker-compose.yml`（`network_mode: host`） |
-| 数据目录 | `./data/`（挂载到容器 `/app/data/`，含 SQLite DB） |
-| 镜像 | `fairyfox/infinite-canvas-api`（Docker Hub） |
-
-### WSL（本地开发/构建环境）
-
-| 属性 | 值 |
-|---|---|
-| 项目路径 | `/mnt/c/Users/root/Documents/project/github/infinite-canvas` |
-| Docker | 可用（`wsl -e bash -c "docker ..."` 从 Windows 调用） |
-| Go | 需要 WSL 内安装或有 Docker 构建 |
-| Node/bun | Windows 侧可用 |
+| 数据目录 | `./data/`（挂载 `/app/data/`，含 SQLite + images） |
 
 ---
 
-## 环境变量（关键项）
+## 构建与部署
 
-| 变量 | 默认 | 说明 |
-|---|---|---|
-| `ADMIN_USERNAME` | `admin` | 管理员账号 |
-| `ADMIN_PASSWORD` | — | 首次启动自动创建 |
-| `JWT_SECRET` | 自动生成 | 若为 `infinite-canvas` 则自动替换随机密钥 |
-| `JWT_EXPIRE_HOURS` | `168` | 7 天 |
-| `PORT` | `8080` | 后端端口 |
-| `STORAGE_DRIVER` | `sqlite` | sqlite / mysql / postgres |
-| `DATABASE_DSN` | `data/infinite-canvas.db` | 数据库连接 |
-| `NEXT_PUBLIC_API_BASE_URL` | — | 前端 API 地址（构建时 baked-in） |
-| `NEXT_PUBLIC_DOC_URL` | `https://docs.canvas.best` | 文档站 |
-
----
-
-## 构建与部署命令
-
-### 后端：修改 Go 代码后部署到 NAS
-
+### 后端部署到 NAS
 ```bash
-# 1. 构建镜像（在 Windows 终端执行）
-wsl -e bash -c "cd /mnt/c/Users/root/Documents/project/github/infinite-canvas && docker build -f Dockerfile.backend -t fairyfox/infinite-canvas-api:v<版本号> ."
+# Windows 终端
+wsl -e bash -c "cd /mnt/c/Users/root/Documents/project/github/infinite-canvas && docker build -f Dockerfile.backend -t fairyfox/infinite-canvas-api:v<N> ."
+wsl -e bash -c "docker push fairyfox/infinite-canvas-api:v<N>"
 
-# 2. 推送
-wsl -e bash -c "docker push fairyfox/infinite-canvas-api:v<版本号>"
-
-# 3. 部署到 NAS（使用 Python paramiko）
-python deploy_nas.py  # 临时脚本，用完删除，包含 SSH 密码
-```
-
-### NAS 部署 Python 脚本模板
-
-```python
-import paramiko
-ssh = paramiko.SSHClient()
-ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-ssh.connect("nas.asac.cc", username="root", password="<来自用户>", timeout=15)
-# 更新 docker-compose.yml 中的 tag → pull → down → up -d
-# compose 路径: /vol1/1000/docker-compose/image/docker-compose.yml
-# sed -i 's|fairyfox/infinite-canvas-api:v[0-9]*|fairyfox/infinite-canvas-api:v<新版本>|g'
-```
-
-### 前端：构建并部署到 Cloudflare Pages
-
-```bash
-cd web
-NEXT_PUBLIC_API_BASE_URL="https://api.asac.cc" bun run build
-# 产物在 web/out/，部署到 Cloudflare Pages
-# 或直接 push 到 GitHub，Cloudflare Pages 自动构建
-```
-
-### 本地开发
-
-```bash
-# 后端
-cd <项目根目录>
-go run .
-
-# 前端（连接远程后端）
-cd web
-NEXT_PUBLIC_API_BASE_URL="https://api.asac.cc" bun run dev -p 3333
+# NAS
+cd /vol1/1000/docker-compose/image
+sed -i 's|fairyfox/infinite-canvas-api:v[0-9]*|fairyfox/infinite-canvas-api:v<N>|g' docker-compose.yml
+docker compose pull && docker compose down && docker compose up -d
 ```
 
 ---
 
-## 关键设计决策与模式
-
-### 1. 异步图片生成（绕过 Cloudflare 100s 限制）
-
-- **问题**：Cloudflare 代理有 100 秒超时，同步等待 AI 图片生成可能超时
-- **方案**：后端内部管理异步任务
-  - `POST /api/v1/images/generations` → 立即返回 `{id, status:"pending"}`
-  - 后台 goroutine 调用上游 AI（5 分钟超时），结果存 SQLite
-  - 前端轮询 `GET /api/v1/images/generations/:id`（120 次 × 2.5s）
-  - `GET /api/v1/images/generations/:id/result` 返回完整结果
-  - `?sync=1` 参数保留原同步路径
-- **关键文件**：`service/image_task.go`（goroutine 池，并发限制 10），`model/image_task.go`，`handler/ai.go`
-- **并发控制**：`make(chan struct{}, 10)` 信号量
-- **清理**：每小时删除 24 小时前的过期任务（`StartImageTaskCleaner`）
-
-### 2. CORS 双重头处理
-
-- **问题**：Go 和 One API 都设 `Access-Control-Allow-Origin`，浏览器拒绝多个值
-- **方案 1**：`handler/ai.go` 的 `copyAIResponse` 跳过上游 CORS 头（`isCORSHeader` 过滤）
-- **方案 2**：`router/router.go` 去重逻辑保留第一个值（Go 的特定 origin），而非 `*`
-- **原因**：`*` 与 `Authorization` 凭证头不兼容
-
-### 3. 模型类型检测
-
-- **旧方案**：纯关键词匹配（`isImageModelName` / `isVideoModelName` / `isTextModelName`）
-- **新方案**：`ModelChannel.Type` 字段（text/image/video/audio），管理员显式设置
-- **兜底**：Type 为空时还是用关键词启发式
-- **影响**：`collectChannelModelsByCapability` 用于 default model repair
-
-### 4. 渠道选择
-
-- `SelectModelChannel(modelName)`：加权随机（`Weight` 字段）从启用的渠道中选择
-- 渠道的 `Models` 列表精确匹配请求的 model name
-- API Key 保存时空值不覆盖已有 key（`keepPrivateAPIKeys`）
-
-### 5. 积分扣费
-
-- 同步：`proxyAIRequest` 中先扣费，上游失败则退款
-- 异步：`SubmitImageTask` 中扣费，`executeImageTask` 失败则 `failImageTask` 退款
-- GET 轮询不扣费
-
----
-
-## 目录结构要点
+## 目录结构
 
 ```
 infinite-canvas/
@@ -203,36 +113,75 @@ infinite-canvas/
 ├── handler/
 │   ├── ai.go                 # AI 代理 + 异步图片 handler
 │   ├── auth.go               # 认证
-│   ├── settings.go           # 设置 API
+│   ├── settings.go           # 设置 API + 模型管理 API
 │   └── response.go           # OK/Fail 响应工具
 ├── middleware/
 │   └── admin.go              # UserAuth / AdminAuth / OptionalAuth
 ├── model/
 │   ├── setting.go            # ModelChannel, Settings 结构体
-│   ├── image_task.go         # 异步图片任务模型
+│   ├── image_task.go         # 异步图片任务 + ResultFiles 文件存储
+│   ├── model_info.go         # ModelInfo 模型元数据（🆕）
 │   └── user.go               # User, CreditLog
 ├── repository/
 │   ├── db.go                 # 数据库初始化 + AutoMigrate
 │   ├── image_task.go         # ImageTask CRUD
+│   ├── model_info.go         # ModelInfo CRUD（🆕）
 │   ├── setting.go            # Settings CRUD
 │   └── user.go               # 用户/积分操作
 ├── router/router.go          # 路由 + CORS 中间件
 ├── service/
-│   ├── settings.go           # 渠道选择、模型分类、配置标准化
-│   ├── image_task.go         # 异步任务 goroutine 池 + 清理器
+│   ├── settings.go           # 渠道选择、模型分类、SyncModelInfos
+│   ├── image_task.go         # 异步任务 goroutine 池 + 清理器 + 图片文件存储
 │   └── auth.go               # 积分扣费/退款
+├── data/images/               # 图片生成结果文件存储 YYYY/MM/userID/
 ├── web/                      # Next.js 前端
-│   ├── src/app/(user)/       # 用户页面（canvas, login, ...）
-│   ├── src/app/(admin)/      # 管理后台
+│   ├── src/app/(user)/       # 用户页面
+│   ├── src/app/(admin)/admin/
+│   │   ├── users/            # 用户管理
+│   │   ├── models/           # 模型管理（🆕 渠道+模型清单+类型规则+定价）
+│   │   ├── assets/           # 素材库
+│   │   ├── prompts/          # 提示词管理
+│   │   ├── credit-logs/      # 算力点日志
+│   │   └── settings/         # 系统设置（🆕 扁平表单）
 │   ├── src/services/api/     # API 客户端
-│   ├── src/stores/           # Zustand stores
-│   └── next.config.ts        # output: "export" (生产) / standalone (开发)
-├── Dockerfile                # 一体化镜像
-├── Dockerfile.backend        # 独立后端镜像（国内 GOPROXY）
-├── docker-compose.yml        # 一体化部署模板
-├── .env.example              # 环境变量模板
-└── docs/split-deployment.md  # 分离部署详细文档
+│   └── src/stores/           # Zustand stores
+└── Dockerfile.backend        # 独立后端镜像
 ```
+
+---
+
+## 关键设计决策
+
+### 1. 异步图片生成（绕过 Cloudflare 100s 限制）
+- `POST /api/v1/images/generations?async=1` → 立即返回 `{id, status:"pending"}`
+- 后台 goroutine 调用上游 AI，结果存文件系统 (`data/images/YYYY/MM/userID/`)
+- 前端轮询 `GET /api/v1/images/generations/:id`（120 次 × 2.5s）
+- 并发控制：信号量 `make(chan struct{}, 10)`
+- 清理：每小时删除 24 小时前的过期任务及其图片文件
+
+### 2. 图片结果文件存储（v19+）
+- 上游返回 base64 → 解码 → 写入 `data/images/YYYY/MM/userID/taskID-N.png`
+- `GET /api/v1/images/generations/:id/result` 返回 `{"data":[{"url":"..."}]}`
+- 图片文件通过 `/api/media/generations/*filepath` 公开下载（永久缓存）
+
+### 3. DNS 劫持修复（v20+）
+- NAS 路由器 DNS (192.168.0.1) 对 `uuapi.cc` 返回劫持 IP `198.18.1.39`
+- Go 后端使用自定义 `net.Resolver` 直连 `119.29.29.29`（DNSPod）绕过
+
+### 4. 信号量泄漏修复（v18）
+- `SubmitImageTask` 重复获取信号量导致槽位永久泄漏
+- 修复：信号量只由 `executeImageTask` goroutine 管理
+
+### 5. CORS 双重头处理
+- Go 和 One API 都设 `Access-Control-Allow-Origin`，浏览器拒绝多个值
+- `copyAIResponse` 跳过上游 CORS 头，router 去重逻辑保留第一个值
+
+### 6. 模型管理（v21+）
+- ModelInfo 表存储模型元数据（provider/model/displayName/type/maxSize 等）
+- 从渠道同步模型 → 手动编辑显示名称/类型/尺寸限制
+- 模型清单支持拖拽排序、搜索筛选、行内编辑、自动保存
+- 类型列支持多选切换（text/image/video/audio）
+- 尺寸列显示 k 分辨率标签（1K/2K/4K）
 
 ---
 
@@ -240,21 +189,8 @@ infinite-canvas/
 
 | 问题 | 排查命令 |
 |---|---|
-| 后端是否存活 | `curl https://api.asac.cc/api/health` → 应返回 `ok` |
-| NAS 容器状态 | SSH → `docker ps --filter name=infinite-canvas-api` |
-| 后端日志 | SSH → `docker logs infinite-canvas-api --tail 100` |
-| CORS 是否正常 | `curl -sI -X OPTIONS -H "Origin: https://image.asac.cc" -H "Access-Control-Request-Method: POST" https://api.asac.cc/api/v1/images/generations` |
-| 异步任务是否创建 | 检查 `POST /api/v1/images/generations` 应返回 `{code:0, data:{id, status}}` |
-| 前端是否最新 | Cloudflare Pages 构建日志（GitHub push → CF dashboard） |
-
----
-
-## 部署检查清单
-
-- [ ] 后端：新 Docker 镜像已推送到 Docker Hub
-- [ ] NAS：`docker-compose.yml` 中 tag 已更新
-- [ ] NAS：`docker compose up -d` 已执行
-- [ ] NAS：`curl localhost:8080/api/health` → `ok`
-- [ ] NAS：`docker logs` 无 panic / 严重错误
-- [ ] 前端：Git push → Cloudflare Pages 构建成功
-- [ ] 验证：浏览器访问 `image.asac.cc` → 登录 → 图片生成可用
+| 后端是否存活 | `curl https://api.asac.cc/api/health` |
+| NAS 容器状态 | `ssh root@nas.asac.cc "docker ps --filter name=infinite-canvas-api"` |
+| 后端日志 | `ssh root@nas.asac.cc "docker logs infinite-canvas-api --tail 100"` |
+| 异步任务状态 | 检查 `POST /api/v1/images/generations?async=1` 返回 |
+| 模型管理 API | `curl -X POST http://localhost:8080/api/admin/models/sync` |
