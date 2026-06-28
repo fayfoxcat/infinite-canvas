@@ -113,17 +113,16 @@ func New() *gin.Engine {
 	admin.GET("/settings", gin.WrapF(handler.AdminSettings))
 	admin.POST("/settings", gin.WrapF(handler.AdminSaveSettings))
 	admin.POST("/settings/channel-models", gin.WrapF(handler.AdminChannelModels))
-	admin.POST("/settings/channel-test", gin.WrapF(handler.AdminTestChannelModel))
-		admin.GET("/models", gin.WrapF(handler.AdminModels))
-		admin.POST("/models", gin.WrapF(handler.AdminSaveModel))
-		admin.PUT("/models/sort", gin.WrapF(handler.AdminUpdateModelSort))
-		admin.PUT("/models/:id/toggle", func(c *gin.Context) {
-			handler.AdminToggleModel(c.Writer, c.Request, c.Param("id"))
-		})
-		admin.DELETE("/models/:id", func(c *gin.Context) {
-			handler.AdminDeleteModel(c.Writer, c.Request, c.Param("id"))
-		})
-		admin.POST("/models/sync", gin.WrapF(handler.AdminSyncModels))
+	admin.GET("/models", gin.WrapF(handler.AdminModels))
+	admin.POST("/models", gin.WrapF(handler.AdminSaveModel))
+	admin.PUT("/models/sort", gin.WrapF(handler.AdminUpdateModelSort))
+	admin.POST("/models/:id/toggle", func(c *gin.Context) {
+		handler.AdminToggleModel(c.Writer, c.Request, c.Param("id"))
+	})
+	admin.DELETE("/models/:id", func(c *gin.Context) {
+		handler.AdminDeleteModel(c.Writer, c.Request, c.Param("id"))
+	})
+	admin.POST("/models/sync", gin.WrapF(handler.AdminSyncModels))
 	admin.GET("/prompt-categories", gin.WrapF(handler.AdminPromptCategories))
 	admin.POST("/prompt-categories/sync", gin.WrapF(handler.AdminSyncPromptCategories))
 	admin.GET("/prompts", gin.WrapF(handler.AdminPrompts))

@@ -38,6 +38,8 @@ cp .env.example .env
 docker compose -f docker-compose.local.yml up -d --build
 ```
 
+主应用镜像会先把前端构建为静态文件，再由 Nginx 对外监听 `3000` 并反代 `/api/*` 和 `/webdav-proxy` 到容器内的 Go 后端。Go 后端只在容器内部监听 `8080`。
+
 ## 文档站镜像
 
 文档站位于 `docs/` 目录，按带服务端能力的 Next.js standalone 应用单独构建，不打进主应用镜像。

@@ -29,7 +29,7 @@
 - 画布助手：围绕选中节点和上游节点对话、生图，并把结果插回画布。
 - 提示词库：抓取多个 GitHub 开源项目，按案例整理数百个图片提示词。
 
-完整功能说明见 [docs/features.md](docs2/features.md)。
+完整功能说明见 [功能介绍](docs/content/docs/overview/features.mdx)。
 
 如果你在为担心没有合适的生图API来发愁，可以查看该免费生图项目：[chatgpt2api](https://github.com/basketikun/chatgpt2api)
 
@@ -92,14 +92,15 @@ https://infinite-canvas-cpco.onrender.com?apiKey={key}&baseUrl={address}
 
 ## 文档
 
-- [功能介绍](docs2/features.md)
-- [部署说明](docs2/deployment.md)
-- [画布节点操作手册](docs2/canvas-node-manual.md)
-- [画布快捷键](docs2/canvas-shortcuts.md)
-- [待办事项](docs2/todo.md)
-- [后端数据库说明](docs2/backend-database.md)
-- [系统配置数据结构](docs2/system-settings.md)
-- [接口响应约定](docs2/api-response.md)
+- [功能介绍](docs/content/docs/overview/features.mdx)
+- [快速开始](docs/content/docs/overview/quick-start.mdx)
+- [Docker 部署](docs/content/docs/overview/docker.mdx)
+- [画布节点操作手册](docs/content/docs/canvas/canvas-node-manual.mdx)
+- [画布快捷键](docs/content/docs/canvas/canvas-shortcuts.mdx)
+- [待办事项](docs/content/docs/progress/todo.mdx)
+- [后端数据库说明](docs/content/docs/backend/backend-database.mdx)
+- [系统配置数据结构](docs/content/docs/backend/system-settings.mdx)
+- [接口响应约定](docs/content/docs/backend/api-response.mdx)
 
 ## 赞助支持
 

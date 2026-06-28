@@ -2,7 +2,7 @@ import axios from "axios";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "";
 
-import { buildApiUrl, type AiConfig } from "@/stores/use-config-store";
+import { buildApiUrl, modelMaxImageSize, type AiConfig } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
 import { nanoid } from "nanoid";
 import { dataUrlToFile } from "@/lib/image-utils";
@@ -114,7 +114,7 @@ function withSystemMessage(config: AiConfig, messages: ChatCompletionMessage[]) 
 export async function requestGeneration(config: AiConfig, prompt: string) {
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
     const quality = normalizeImageQuality(config.quality);
-    const requestSize = resolveImageRequestSize(config.imageResolution, config.size);
+    const requestSize = validateModelImageSize(resolveImageRequestSize(config.imageResolution, config.size), modelMaxImageSize(config, config.imageModel || config.model));
 
     if (config.channelMode === "remote") {
         return requestGenerationAsync(config, prompt, n, quality, requestSize);
@@ -245,7 +245,7 @@ function delay(ms: number) {
 export async function requestEdit(config: AiConfig, prompt: string, references: ReferenceImage[], mask?: ReferenceImage) {
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
     const quality = normalizeImageQuality(config.quality);
-    const requestSize = resolveImageRequestSize(config.imageResolution, config.size);
+    const requestSize = validateModelImageSize(resolveImageRequestSize(config.imageResolution, config.size), modelMaxImageSize(config, config.imageModel || config.model));
     const requestPrompt = buildImageReferencePromptText(prompt, references);
     const formData = new FormData();
     formData.set("model", config.model);
@@ -350,4 +350,41 @@ export async function fetchImageModels(config: AiConfig) {
     } catch (error) {
         throw new Error(readAxiosError(error, "读取模型失败"));
     }
+}
+
+function validateModelImageSize(requestSize: string | undefined, maxSize: string) {
+    if (!requestSize || !maxSize) return requestSize;
+    const maxRank = imageSizeRank(maxSize);
+    if (maxRank > 0 && imageSizeRank(requestSize) > maxRank) {
+        throw new Error(`当前模型最大支持 ${formatMaxImageSize(maxSize)}，请降低清晰度或调整尺寸`);
+    }
+    const request = parseImageDimensions(requestSize);
+    const max = parseImageDimensions(maxSize);
+    if (!request || !max) return requestSize;
+    if (request.width > max.width || request.height > max.height) {
+        throw new Error(`当前模型最大支持 ${maxSize}，请降低清晰度或调整尺寸`);
+    }
+    return requestSize;
+}
+
+function parseImageDimensions(value: string) {
+    const match = value.match(/^(\d+)x(\d+)$/i);
+    return match ? { width: Number(match[1]), height: Number(match[2]) } : null;
+}
+
+function imageSizeRank(value: string) {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "1k") return 1;
+    if (normalized === "2k") return 2;
+    if (normalized === "4k") return 3;
+    const dimensions = parseImageDimensions(normalized);
+    if (!dimensions) return 0;
+    const edge = Math.max(dimensions.width, dimensions.height);
+    if (edge <= 1024) return 1;
+    if (edge <= 2048) return 2;
+    return 3;
+}
+
+function formatMaxImageSize(maxSize: string) {
+    return ({ auto: "自动", "1k": "1K", "2k": "2K", "4k": "4K" } as Record<string, string>)[maxSize.trim().toLowerCase()] || maxSize;
 }

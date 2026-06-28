@@ -232,3 +232,5 @@ PORT=8080
 6. **数据持久化**：SQLite 数据库挂载在 `./data`，重部署时勿删除此目录。
 
 7. **网络模式**：`network_mode: host` 避免 Docker 网络层 NAT 导致的 IPv6 连接问题。副作用是容器端口直接占用宿主机端口。
+
+8. **主应用 Dockerfile**：当前主应用镜像也按静态前端构建，运行时由 Nginx 服务 `web/out` 并反代 `/api/*` 到容器内 Go 后端；不再依赖 Next.js `standalone` 产物。

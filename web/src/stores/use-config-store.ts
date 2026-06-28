@@ -8,6 +8,8 @@ import { inferImageResolutionFromSize, normalizeImageSizeValue } from "@/lib/ima
 import { apiGet } from "@/services/api/request";
 import type { AdminPublicSettings } from "@/services/api/admin";
 
+export type PublicModelInfo = AdminPublicSettings["modelChannel"]["modelInfos"][number];
+
 export type AiConfig = {
     channelMode: "remote" | "local";
     baseUrl: string;
@@ -31,6 +33,7 @@ export type AiConfig = {
     videoModels: string[];
     textModels: string[];
     audioModels: string[];
+    modelInfos: PublicModelInfo[];
     quality: string;
     size: string;
     imageResolution: string;
@@ -49,6 +52,7 @@ export type WebdavSyncConfig = {
 
 export const CONFIG_STORE_KEY = "infinite-canvas:ai_config_store";
 export type ModelCapability = "image" | "video" | "text" | "audio";
+const MODEL_OPTION_SEPARATOR = "::";
 
 export const defaultConfig: AiConfig = {
     channelMode: "local",
@@ -73,6 +77,7 @@ export const defaultConfig: AiConfig = {
     videoModels: [],
     textModels: [],
     audioModels: [],
+    modelInfos: [],
     quality: "auto",
     size: "auto",
     imageResolution: "1k",
@@ -127,6 +132,7 @@ function resolveEffectiveConfig(config: AiConfig, modelChannel: AdminPublicSetti
         videoModels,
         textModels,
         audioModels,
+        modelInfos: modelChannel.modelInfos || [],
         model: textModels.includes(config.model) ? config.model : fallbackModel,
         imageModel: imageModels.includes(config.imageModel) ? config.imageModel : fallbackImageModel,
         videoModel: videoModels.includes(config.videoModel) ? config.videoModel : fallbackVideoModel,
@@ -145,17 +151,17 @@ function preferredModel(models: string[], predicate: (model: string) => boolean)
 }
 
 function isVideoModelName(model: string) {
-    const value = model.toLowerCase();
+    const value = modelOptionRawName(model).toLowerCase();
     return value.includes("seedance") || value.includes("video") || value.includes("sora") || value.includes("veo") || value.includes("kling") || value.includes("wan") || value.includes("hailuo");
 }
 
 function isImageModelName(model: string) {
-    const value = model.toLowerCase();
+    const value = modelOptionRawName(model).toLowerCase();
     return !isVideoModelName(model) && !isAudioModelName(model) && (value.includes("seedream") || value.includes("gpt-image") || value.includes("image") || value.includes("dall-e") || value.includes("dalle") || value.includes("imagen") || value.includes("flux") || value.includes("sdxl") || value.includes("stable-diffusion") || value.includes("midjourney"));
 }
 
 function isAudioModelName(model: string) {
-    const value = model.toLowerCase();
+    const value = modelOptionRawName(model).toLowerCase();
     return value.includes("audio") || value.includes("tts") || value.includes("speech") || value.includes("voice") || value.includes("music") || value.includes("sound");
 }
 
@@ -178,6 +184,42 @@ export function filterModelsByCapability(models: string[], capability?: ModelCap
 export function selectableModelsByCapability(config: AiConfig, capability?: ModelCapability) {
     if (!capability) return config.models;
     return config[modelListKey(capability)];
+}
+
+export function splitModelOptionValue(value: string) {
+    const trimmed = value.trim();
+    const index = trimmed.indexOf(MODEL_OPTION_SEPARATOR);
+    if (index <= 0 || index + MODEL_OPTION_SEPARATOR.length >= trimmed.length) {
+        return { provider: "", model: trimmed, scoped: false };
+    }
+    return {
+        provider: trimmed.slice(0, index).trim(),
+        model: trimmed.slice(index + MODEL_OPTION_SEPARATOR.length).trim(),
+        scoped: true,
+    };
+}
+
+export function modelOptionRawName(value: string) {
+    return splitModelOptionValue(value).model;
+}
+
+export function modelInfoForModel(config: AiConfig, model: string) {
+    const selected = splitModelOptionValue(model);
+    return (
+        config.modelInfos.find((item) => item.value === model) ||
+        (selected.provider ? config.modelInfos.find((item) => item.provider === selected.provider && item.model === selected.model) : null) ||
+        config.modelInfos.find((item) => item.model === selected.model) ||
+        null
+    );
+}
+
+export function modelDisplayName(config: AiConfig, model: string) {
+    return modelInfoForModel(config, model)?.displayName || modelOptionRawName(model);
+}
+
+export function modelMaxImageSize(config: AiConfig, model: string) {
+    const maxSize = modelInfoForModel(config, model)?.maxSize || "";
+    return maxSize === "auto" ? "" : maxSize;
 }
 
 function modelListKey(capability: ModelCapability) {
@@ -249,6 +291,7 @@ export const useConfigStore = create<ConfigStore>()(
                         audioFormat: config.audioFormat || defaultConfig.audioFormat,
                         audioSpeed: config.audioSpeed || defaultConfig.audioSpeed,
                         audioInstructions: config.audioInstructions || "",
+                        modelInfos: [],
                         videoSeconds: config.videoSeconds || "6",
                         vquality: config.vquality || "720",
                         imageResolution: config.imageResolution || "1k",

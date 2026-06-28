@@ -23,14 +23,22 @@ import (
 
 var adminModelHTTPClient = &http.Client{Timeout: 30 * time.Second}
 
+const modelSelectionSeparator = "::"
+
 func PublicSettings() (model.PublicSetting, error) {
 	settings, err := repository.GetSettings()
-	return normalizeSettings(settings).Public, err
+	if err != nil {
+		return model.PublicSetting{}, err
+	}
+	return applyModelInfos(normalizeSettings(settings)).Public, nil
 }
 
 func AdminSettings() (model.Settings, error) {
 	settings, err := repository.GetSettings()
-	return hidePrivateAPIKeys(normalizeSettings(settings)), err
+	if err != nil {
+		return model.Settings{}, err
+	}
+	return hidePrivateAPIKeys(applyModelInfos(normalizeSettings(settings))), nil
 }
 
 func SaveSettings(settings model.Settings) (model.Settings, error) {
@@ -41,13 +49,18 @@ func SaveSettings(settings model.Settings) (model.Settings, error) {
 	settings = normalizeSettings(settings)
 	keepPrivateAPIKeys(&settings, normalizeSettings(saved))
 	keepPrivateAuthSecrets(&settings, normalizeSettings(saved))
+	totalChannels, enabledChannels, enabledModels := modelChannelLogStats(settings.Private.Channels)
+	log.Printf("admin settings save: channels=%d enabledChannels=%d enabledModels=%d", totalChannels, enabledChannels, enabledModels)
 	result, err := repository.SaveSettings(settings, now())
 	if err == nil {
 		RefreshPromptSyncScheduler()
 		// 同步写回模型类型规则文件
 		_ = saveModelTypeRulesToFile(settings.Public.ModelChannel.ModelTypeRules)
 	}
-	return hidePrivateAPIKeys(result), err
+	if err != nil {
+		return hidePrivateAPIKeys(result), err
+	}
+	return hidePrivateAPIKeys(applyModelInfos(normalizeSettings(result))), nil
 }
 
 func AdminChannelModels(index *int, channel model.ModelChannel) ([]string, error) {
@@ -56,17 +69,6 @@ func AdminChannelModels(index *int, channel model.ModelChannel) ([]string, error
 		return nil, err
 	}
 	return fetchAdminChannelModels(resolved)
-}
-
-func AdminTestChannelModel(index *int, channel model.ModelChannel, modelName string) (string, error) {
-	resolved, err := resolveAdminChannel(index, channel)
-	if err != nil {
-		return "", err
-	}
-	if isArkAgentPlanChannel(resolved) || isSeedanceModelName(modelName) {
-		return testArkSeedanceChannelModel(resolved, modelName)
-	}
-	return testAdminChannelModel(resolved, modelName)
 }
 
 var modelTypeRulesSeeded bool
@@ -102,6 +104,9 @@ func normalizePublicSetting(setting model.PublicSetting) model.PublicSetting {
 func normalizePublicSettingWithChannels(setting model.PublicSetting, channels []model.ModelChannel) model.PublicSetting {
 	if setting.ModelChannel.AvailableModels == nil {
 		setting.ModelChannel.AvailableModels = []string{}
+	}
+	if setting.ModelChannel.ModelInfos == nil {
+		setting.ModelChannel.ModelInfos = []model.PublicModelInfo{}
 	}
 	if setting.ModelChannel.ModelCosts == nil {
 		setting.ModelChannel.ModelCosts = []model.ModelCost{}
@@ -147,19 +152,122 @@ func normalizePublicSettingWithChannels(setting model.PublicSetting, channels []
 	setting.ModelChannel.DefaultVideoModel = repairDefaultModel(setting.ModelChannel.DefaultVideoModel, videoModels, nil)
 	setting.ModelChannel.DefaultTextModel = repairDefaultModel(setting.ModelChannel.DefaultTextModel, textModels, nil)
 	setting.ModelChannel.DefaultAudioModel = repairDefaultModel(setting.ModelChannel.DefaultAudioModel, audioModels, nil)
-	setting.ModelChannel.DefaultModel = repairDefaultModel(setting.ModelChannel.DefaultModel, setting.ModelChannel.AvailableModels, isTextModelName)
+	setting.ModelChannel.DefaultModel = repairDefaultModel(setting.ModelChannel.DefaultModel, setting.ModelChannel.AvailableModels, func(modelName string) bool {
+		return containsString(setting.ModelChannel.TextModels, modelName)
+	})
 	return setting
 }
 
-func ModelCost(modelName string) (int, error) {
+func applyModelInfos(settings model.Settings) model.Settings {
+	settings.Public = applyModelInfosToPublicSetting(settings.Public, settings.Private.Channels)
+	return settings
+}
+
+type publicModelOption struct {
+	Value    string
+	Provider string
+	Model    string
+	Info     model.ModelInfo
+	HasInfo  bool
+	Types    []string
+}
+
+func applyModelInfosToPublicSetting(setting model.PublicSetting, channels []model.ModelChannel) model.PublicSetting {
+	channelModels := enabledChannelModels(channels)
+	if len(channelModels) == 0 {
+		setting.ModelChannel.ModelInfos = []model.PublicModelInfo{}
+		return setting
+	}
+	infos, err := repository.ListModelInfosByModels(channelModels)
+	if err != nil {
+		log.Printf("load model infos failed: %v", err)
+		return setting
+	}
+
+	infoByKey := modelInfoByProviderModel(infos)
+	options := []publicModelOption{}
+	seenOptions := map[string]bool{}
+	for _, channel := range channels {
+		if !channel.Enabled {
+			continue
+		}
+		provider := modelChannelProvider(channel)
+		for _, item := range channel.Models {
+			modelName := strings.TrimSpace(item)
+			if modelName == "" {
+				continue
+			}
+			info, hasInfo := infoByKey[modelInfoKey(provider, modelName)]
+			if hasInfo && !info.Enabled {
+				continue
+			}
+			value := ModelSelectionValue(provider, modelName)
+			if seenOptions[value] {
+				continue
+			}
+			seenOptions[value] = true
+			types := modelInfoTypes(info)
+			if len(types) == 0 {
+				types = classifyModelByChannel(modelName, channel)
+			}
+			if len(types) == 0 {
+				types = []string{heuristicModelType(modelName)}
+			}
+			options = append(options, publicModelOption{
+				Value:    value,
+				Provider: provider,
+				Model:    modelName,
+				Info:     info,
+				HasInfo:  hasInfo,
+				Types:    types,
+			})
+		}
+	}
+	sort.SliceStable(options, func(i, j int) bool {
+		left, right := options[i], options[j]
+		if left.HasInfo && right.HasInfo {
+			if left.Info.SortOrder != right.Info.SortOrder {
+				return left.Info.SortOrder < right.Info.SortOrder
+			}
+			return left.Info.ID < right.Info.ID
+		}
+		return left.HasInfo && !right.HasInfo
+	})
+
+	setting.ModelChannel.AvailableModels = publicModelOptionValues(options)
+	setting.ModelChannel.ModelInfos = publicModelInfosFromOptions(options)
+	setting.ModelChannel.TextModels = collectPublicModelOptionsByCapability(options, "text")
+	setting.ModelChannel.ImageModels = collectPublicModelOptionsByCapability(options, "image")
+	setting.ModelChannel.VideoModels = collectPublicModelOptionsByCapability(options, "video")
+	setting.ModelChannel.AudioModels = collectPublicModelOptionsByCapability(options, "audio")
+	setting.ModelChannel.DefaultImageModel = repairDefaultModel(setting.ModelChannel.DefaultImageModel, setting.ModelChannel.ImageModels, nil)
+	setting.ModelChannel.DefaultVideoModel = repairDefaultModel(setting.ModelChannel.DefaultVideoModel, setting.ModelChannel.VideoModels, nil)
+	setting.ModelChannel.DefaultTextModel = repairDefaultModel(setting.ModelChannel.DefaultTextModel, setting.ModelChannel.TextModels, nil)
+	setting.ModelChannel.DefaultAudioModel = repairDefaultModel(setting.ModelChannel.DefaultAudioModel, setting.ModelChannel.AudioModels, nil)
+	setting.ModelChannel.DefaultModel = repairDefaultModel(setting.ModelChannel.DefaultModel, setting.ModelChannel.AvailableModels, func(modelName string) bool {
+		return containsString(setting.ModelChannel.TextModels, modelName)
+	})
+	return setting
+}
+
+func ModelCost(modelSelection string) (int, error) {
 	settings, err := repository.GetSettings()
 	if err != nil {
 		return 0, err
 	}
-	modelName = strings.TrimSpace(modelName)
-	for _, item := range normalizePublicSetting(settings.Public).ModelChannel.ModelCosts {
-		if item.Model == modelName {
+	modelSelection = strings.TrimSpace(modelSelection)
+	rawModelName := ModelNameFromSelection(modelSelection)
+	modelCosts := normalizePublicSetting(settings.Public).ModelChannel.ModelCosts
+	for _, item := range modelCosts {
+		if item.Model == modelSelection {
 			return item.Credits, nil
+		}
+	}
+	if rawModelName != modelSelection {
+		for _, item := range modelCosts {
+			if item.Model == rawModelName {
+				return item.Credits, nil
+			}
 		}
 	}
 	return 0, nil
@@ -220,18 +328,21 @@ func findSavedChannel(channel model.ModelChannel, saved []model.ModelChannel, in
 			return item, true
 		}
 	}
-	if index < len(saved) {
+	if index >= 0 && index < len(saved) {
 		return saved[index], true
 	}
 	return model.ModelChannel{}, false
 }
 
-func SelectModelChannel(modelName string) (model.ModelChannel, error) {
+func SelectModelChannel(modelSelection string) (model.ModelChannel, error) {
 	settings, err := repository.GetSettings()
 	if err != nil {
 		return model.ModelChannel{}, err
 	}
-	channels := modelChannelsForModel(normalizePrivateSetting(settings.Private).Channels, modelName)
+	channels, err := modelChannelsForModel(normalizePrivateSetting(settings.Private).Channels, modelSelection)
+	if err != nil {
+		return model.ModelChannel{}, err
+	}
 	if len(channels) == 0 {
 		return model.ModelChannel{}, errors.New("没有可用模型渠道")
 	}
@@ -281,11 +392,6 @@ func normalizeModelChannelBaseURL(baseURL string) string {
 func isArkAgentPlanChannel(channel model.ModelChannel) bool {
 	baseURL := strings.ToLower(normalizeModelChannelBaseURL(channel.BaseURL))
 	return strings.HasSuffix(baseURL, "/api/plan/v3")
-}
-
-func isSeedanceModelName(modelName string) bool {
-	modelName = strings.ToLower(strings.TrimSpace(modelName))
-	return strings.Contains(modelName, "seedance") || strings.Contains(modelName, "doubao-seedance")
 }
 
 func enabledChannelModels(channels []model.ModelChannel) []string {
@@ -416,6 +522,111 @@ func collectChannelModelsByCapability(channels []model.ModelChannel, capability 
 		}
 	}
 	return uniqueModelNames(result)
+}
+
+func modelInfoByProviderModel(infos []model.ModelInfo) map[string]model.ModelInfo {
+	result := map[string]model.ModelInfo{}
+	for _, info := range infos {
+		result[modelInfoKey(info.Provider, info.Model)] = info
+	}
+	return result
+}
+
+func modelChannelProvider(channel model.ModelChannel) string {
+	provider := strings.TrimSpace(channel.Name)
+	if provider == "" {
+		provider = strings.TrimSpace(channel.BaseURL)
+	}
+	return provider
+}
+
+func modelInfoKey(provider string, modelName string) string {
+	return strings.TrimSpace(provider) + "\x00" + strings.TrimSpace(modelName)
+}
+
+func ModelSelectionValue(provider string, modelName string) string {
+	provider = strings.TrimSpace(provider)
+	modelName = strings.TrimSpace(modelName)
+	if provider == "" {
+		return modelName
+	}
+	return provider + modelSelectionSeparator + modelName
+}
+
+func ParseModelSelection(value string) (string, string) {
+	value = strings.TrimSpace(value)
+	index := strings.Index(value, modelSelectionSeparator)
+	if index <= 0 || index+len(modelSelectionSeparator) >= len(value) {
+		return "", value
+	}
+	return strings.TrimSpace(value[:index]), strings.TrimSpace(value[index+len(modelSelectionSeparator):])
+}
+
+func ModelNameFromSelection(value string) string {
+	_, modelName := ParseModelSelection(value)
+	return modelName
+}
+
+func publicModelOptionValues(options []publicModelOption) []string {
+	result := make([]string, 0, len(options))
+	for _, item := range options {
+		result = append(result, item.Value)
+	}
+	return result
+}
+
+func publicModelInfosFromOptions(options []publicModelOption) []model.PublicModelInfo {
+	result := make([]model.PublicModelInfo, 0, len(options))
+	for _, item := range options {
+		displayName := item.Model
+		maxSize := ""
+		if item.HasInfo {
+			displayName = strings.TrimSpace(item.Info.DisplayName)
+			maxSize = strings.TrimSpace(item.Info.MaxSize)
+			if displayName == "" {
+				displayName = item.Model
+			}
+		}
+		result = append(result, model.PublicModelInfo{
+			Value:       item.Value,
+			Provider:    item.Provider,
+			Model:       item.Model,
+			DisplayName: displayName,
+			Type:        strings.Join(item.Types, ","),
+			MaxSize:     maxSize,
+		})
+	}
+	return result
+}
+
+func collectPublicModelOptionsByCapability(options []publicModelOption, capability string) []string {
+	result := []string{}
+	for _, item := range options {
+		if containsString(item.Types, capability) {
+			result = append(result, item.Value)
+		}
+	}
+	return result
+}
+
+func modelInfoTypes(info model.ModelInfo) []string {
+	result := []string{}
+	for _, item := range strings.Split(info.Type, ",") {
+		item = strings.ToLower(strings.TrimSpace(item))
+		if (item == "text" || item == "image" || item == "video" || item == "audio") && !containsString(result, item) {
+			result = append(result, item)
+		}
+	}
+	return result
+}
+
+func containsString(items []string, value string) bool {
+	for _, item := range items {
+		if item == value {
+			return true
+		}
+	}
+	return false
 }
 
 // --- 全局模型类型规则匹配 ---
@@ -625,62 +836,6 @@ func fetchAdminChannelModels(channel model.ModelChannel) ([]string, error) {
 	return result, nil
 }
 
-func testAdminChannelModel(channel model.ModelChannel, modelName string) (string, error) {
-	if strings.TrimSpace(modelName) == "" {
-		return "", errors.New("缺少模型名称")
-	}
-	body, _ := json.Marshal(map[string]any{
-		"model": modelName,
-		"messages": []map[string]string{{
-			"role":    "user",
-			"content": "hi",
-		}},
-	})
-	request, err := http.NewRequest(http.MethodPost, BuildModelChannelURL(channel, "/chat/completions"), strings.NewReader(string(body)))
-	if err != nil {
-		return "", err
-	}
-	request.Header.Set("Authorization", "Bearer "+channel.APIKey)
-	request.Header.Set("Content-Type", "application/json")
-	response, err := adminModelHTTPClient.Do(request)
-	if err != nil {
-		return "", safeMessageError{message: "测试失败：上游接口无响应或网络不可达"}
-	}
-	defer response.Body.Close()
-	responseBody, _ := io.ReadAll(response.Body)
-	if response.StatusCode >= http.StatusBadRequest {
-		return "", readAdminChannelError(responseBody, response.StatusCode, "测试失败")
-	}
-	var payload struct {
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
-	}
-	_ = json.Unmarshal(responseBody, &payload)
-	if len(payload.Choices) > 0 && strings.TrimSpace(payload.Choices[0].Message.Content) != "" {
-		return payload.Choices[0].Message.Content, nil
-	}
-	return "ok", nil
-}
-
-func testArkSeedanceChannelModel(channel model.ModelChannel, modelName string) (string, error) {
-	if strings.TrimSpace(modelName) == "" {
-		return "", errors.New("缺少模型名称")
-	}
-	if strings.TrimSpace(channel.BaseURL) == "" {
-		return "", safeMessageError{message: "缺少接口地址"}
-	}
-	if strings.TrimSpace(channel.APIKey) == "" {
-		return "", safeMessageError{message: "缺少 API Key"}
-	}
-	if !isArkAgentPlanChannel(channel) {
-		return "Seedance 视频模型不会发送 /chat/completions 文本测试。已检查 Base URL、API Key 和模型名非空；未调用视频生成接口，因此未验证套餐额度或模型权限。", nil
-	}
-	return "Agent Plan / Seedance 视频模型配置格式已通过。后台测试不会调用视频生成接口，因此未验证 API Key、套餐额度或模型权限；请在画布中使用视频生成验证。", nil
-}
-
 func readAdminChannelError(body []byte, statusCode int, fallback string) error {
 	var payload struct {
 		Error *struct {
@@ -720,51 +875,81 @@ func (err safeMessageError) SafeMessage() string {
 	return err.message
 }
 
-func modelChannelsForModel(channels []model.ModelChannel, modelName string) []model.ModelChannel {
+func modelChannelsForModel(channels []model.ModelChannel, modelSelection string) ([]model.ModelChannel, error) {
+	providerFilter, modelName := ParseModelSelection(modelSelection)
+	infos, err := repository.ListModelInfosByModels([]string{modelName})
+	if err != nil {
+		return nil, err
+	}
+	infoByKey := modelInfoByProviderModel(infos)
 	result := []model.ModelChannel{}
 	for _, channel := range channels {
 		if !channel.Enabled || channel.BaseURL == "" || channel.APIKey == "" {
 			continue
 		}
+		provider := modelChannelProvider(channel)
+		if providerFilter != "" && provider != providerFilter {
+			continue
+		}
 		for _, item := range channel.Models {
 			if strings.TrimSpace(item) == modelName {
+				if info, ok := infoByKey[modelInfoKey(provider, modelName)]; ok && !info.Enabled {
+					break
+				}
 				result = append(result, channel)
 				break
 			}
 		}
 	}
-	return result
+	return result, nil
 }
 
 // SyncModelInfos 从渠道模型列表同步到 model_infos 表。
 // 新模型自动创建，已存在的模型保留用户编辑的元数据。
 func SyncModelInfos(channels []model.ModelChannel) (int, error) {
-	existingModels, err := repository.AllModelInfoModels()
+	existingModels, err := repository.AllModelInfoKeys()
 	if err != nil {
 		return 0, err
 	}
+	minSortOrder, err := repository.MinModelInfoSortOrder()
+	if err != nil {
+		return 0, err
+	}
+	totalChannels, enabledChannels, enabledModels := modelChannelLogStats(channels)
+	log.Printf("admin model sync start: channels=%d enabledChannels=%d enabledModels=%d existingModels=%d minSortOrder=%d", totalChannels, enabledChannels, enabledModels, len(existingModels), minSortOrder)
 
 	synced := 0
+	skippedDisabledChannels := 0
+	skippedExisting := 0
+	skippedEmpty := 0
+	createdModels := []string{}
+	existingPreview := []string{}
+	nextSortOrder := minSortOrder
 	for _, ch := range channels {
 		if !ch.Enabled {
+			skippedDisabledChannels++
 			continue
 		}
-		provider := ch.Name
-		if provider == "" {
-			provider = ch.BaseURL
-		}
+		provider := modelChannelProvider(ch)
 		for _, modelName := range ch.Models {
 			modelName = strings.TrimSpace(modelName)
 			if modelName == "" {
+				skippedEmpty++
 				continue
 			}
-			if existingModels[modelName] {
+			key := modelInfoKey(provider, modelName)
+			if existingModels[key] {
+				skippedExisting++
+				if len(existingPreview) < 8 {
+					existingPreview = append(existingPreview, provider+"/"+modelName)
+				}
 				continue // 已存在，保留用户编辑
 			}
+			nextSortOrder--
 			types := classifyModelByChannel(modelName, ch)
 			modelType := "text"
 			if len(types) > 0 {
-				modelType = types[0]
+				modelType = strings.Join(types, ",")
 			}
 			info := model.ModelInfo{
 				Provider:    provider,
@@ -772,14 +957,43 @@ func SyncModelInfos(channels []model.ModelChannel) (int, error) {
 				DisplayName: modelName,
 				Type:        modelType,
 				MaxSize:     "",
+				SortOrder:   nextSortOrder,
 				Enabled:     true,
 			}
 			if err := repository.UpsertModelInfo(&info); err != nil {
 				return synced, err
 			}
-			existingModels[modelName] = true
+			existingModels[key] = true
+			createdModels = append(createdModels, provider+"/"+modelName)
 			synced++
 		}
 	}
+	log.Printf("admin model sync done: created=%d skippedExisting=%d skippedEmpty=%d skippedDisabledChannels=%d createdModels=%v existingPreview=%v", synced, skippedExisting, skippedEmpty, skippedDisabledChannels, previewStrings(createdModels, 8), existingPreview)
 	return synced, nil
+}
+
+func modelChannelLogStats(channels []model.ModelChannel) (int, int, int) {
+	enabledChannels := 0
+	enabledModels := 0
+	for _, channel := range channels {
+		if !channel.Enabled {
+			continue
+		}
+		enabledChannels++
+		for _, modelName := range channel.Models {
+			if strings.TrimSpace(modelName) != "" {
+				enabledModels++
+			}
+		}
+	}
+	return len(channels), enabledChannels, enabledModels
+}
+
+func previewStrings(items []string, limit int) []string {
+	if len(items) <= limit {
+		return items
+	}
+	result := append([]string{}, items[:limit]...)
+	result = append(result, fmt.Sprintf("... +%d", len(items)-limit))
+	return result
 }

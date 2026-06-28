@@ -22,25 +22,22 @@ COPY repository ./repository
 COPY router ./router
 COPY service ./service
 COPY main.go ./
-RUN go build -o /server .
+RUN CGO_ENABLED=0 go build -o /server .
 
-# 运行镜像：Next.js 对外监听 3000，Go 只在容器内部监听 8080。
-FROM node:22-bookworm-slim
+# 运行镜像：Nginx 对外监听 3000，Go 只在容器内部监听 8080。
+FROM nginx:1.29-alpine
 
 WORKDIR /app
 COPY VERSION /app/VERSION
 COPY CHANGELOG.md /app/CHANGELOG.md
 COPY --from=api-build /server /app/server
-COPY --from=web-build /app/web/public /app/web/public
-COPY --from=web-build /app/web/.next/standalone /app/web
-COPY --from=web-build /app/web/.next/static /app/web/.next/static
-ENV NODE_ENV=production
-ENV HOSTNAME=0.0.0.0
-ENV PORT=3000
+COPY --from=api-build /app/config /app/config
+COPY --from=web-build /app/web/out /usr/share/nginx/html
+COPY deploy/nginx.conf /etc/nginx/conf.d/default.conf
+ENV PORT=8080
 ENV PROMPT_DATA_DIR=/app/data/prompts
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
-RUN mkdir -p /app/data/prompts
+RUN apk add --no-cache ca-certificates tzdata && mkdir -p /app/data/prompts
 
 EXPOSE 3000
-# 先启动内部 Go API，再由 Next.js 提供页面并代理 /api/*。
-CMD ["sh", "-c", "PORT=8080 /app/server & cd /app/web && PORT=3000 node server.js"]
+# 先启动内部 Go API，再由 Nginx 提供静态页面并代理 /api/*。
+CMD ["sh", "-c", "PORT=8080 /app/server & nginx -g 'daemon off;'"]

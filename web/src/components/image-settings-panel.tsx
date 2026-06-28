@@ -1,11 +1,11 @@
 "use client";
 
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { ConfigProvider, Switch } from "antd";
 
 import { type CanvasTheme } from "@/lib/canvas-theme";
 import { imageResolutionLabel as formatImageResolutionLabel, normalizeImageSizeValue, resolveImageDisplayDimensions } from "@/lib/image-size";
-import type { AiConfig } from "@/stores/use-config-store";
+import { modelMaxImageSize, type AiConfig } from "@/stores/use-config-store";
 
 const qualityOptions = [
     { value: "auto", label: "自动" },
@@ -45,15 +45,17 @@ type ImageSettingsPanelProps = {
 export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = true, className = "w-[320px] space-y-4 rounded-2xl px-1 py-0.5", maxCount = 15, quickCount = 10, showCount = true }: ImageSettingsPanelProps) {
     const [snapDimensionToStep, setSnapDimensionToStep] = useState(true);
     const quality = config.quality || "auto";
-    const imageResolution = config.imageResolution || "1k";
+    const maxImageSize = modelMaxImageSize(config, config.imageModel || config.model);
+    const configuredResolution = resolutionOptions.some((item) => item.value === config.imageResolution) ? config.imageResolution : "1k";
+    const imageResolution = isResolutionAllowed(configuredResolution, maxImageSize) ? configuredResolution : highestAllowedResolution(maxImageSize);
     const count = Math.max(1, Math.min(maxCount, Math.floor(Math.abs(Number(config.count)) || 1)));
     const activeSize = config.size || "auto";
     const activeAspect = normalizeImageSizeValue(activeSize);
-    const selectedAspect = aspectOptions.find((item) => (item.size || item.value) === activeAspect || item.value === activeAspect);
+    const selectedAspect = aspectOptions.find((item) => item.value === activeAspect);
     const dimensions = resolveImageDisplayDimensions(activeSize, imageResolution, selectedAspect || aspectOptions[1]);
     const selectAspect = (value: string) => {
         const option = aspectOptions.find((item) => item.value === value);
-        onConfigChange("size", option?.size || option?.value || "auto");
+        onConfigChange("size", option?.value || "auto");
     };
     const updateDimension = (key: "width" | "height", value: number | null) => {
         const next = Math.max(1, Math.floor(value || dimensions[key] || 1024));
@@ -61,6 +63,13 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
         const height = key === "height" ? next : dimensions.height;
         onConfigChange("size", `${alignDimension(width, snapDimensionToStep)}x${alignDimension(height, snapDimensionToStep)}`);
     };
+
+    useEffect(() => {
+        const nextResolution = isResolutionAllowed(configuredResolution, maxImageSize) ? configuredResolution : highestAllowedResolution(maxImageSize);
+        if (config.imageResolution !== nextResolution) {
+            onConfigChange("imageResolution", nextResolution);
+        }
+    }, [config.imageResolution, configuredResolution, maxImageSize, onConfigChange]);
 
     return (
         <ImageSettingsTheme theme={theme}>
@@ -88,7 +97,7 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                     <SettingTitle color={theme.node.muted}>清晰度</SettingTitle>
                     <div className="grid grid-cols-3 gap-2.5">
                         {resolutionOptions.map((item) => (
-                            <OptionPill key={item.value} selected={imageResolution === item.value} theme={theme} onClick={() => onConfigChange("imageResolution", item.value)}>
+                            <OptionPill key={item.value} selected={imageResolution === item.value} disabled={!isResolutionAllowed(item.value, maxImageSize)} theme={theme} onClick={() => onConfigChange("imageResolution", item.value)}>
                                 {item.label}
                             </OptionPill>
                         ))}
@@ -167,19 +176,20 @@ export function imageQualityLabel(value: string) {
 
 export function imageSizeLabel(size: string) {
     const value = normalizeImageSizeValue(size);
-    return aspectOptions.find((item) => (item.size || item.value) === value || item.value === value)?.label || value;
+    return aspectOptions.find((item) => item.value === value)?.label || value;
 }
 
 export function imageResolutionLabel(value: string) {
     return formatImageResolutionLabel(value);
 }
 
-function OptionPill({ selected, theme, onClick, children }: { selected: boolean; theme: CanvasTheme; onClick: () => void; children: ReactNode }) {
+function OptionPill({ selected, disabled = false, theme, onClick, children }: { selected: boolean; disabled?: boolean; theme: CanvasTheme; onClick: () => void; children: ReactNode }) {
     return (
         <button
             type="button"
-            className="h-9 cursor-pointer rounded-full border px-2 text-sm transition hover:opacity-80"
-            style={{ background: "transparent", borderColor: selected ? theme.node.text : theme.node.stroke, color: theme.node.text }}
+            disabled={disabled}
+            className="h-9 cursor-pointer rounded-full border px-2 text-sm transition hover:opacity-80 disabled:cursor-not-allowed disabled:hover:opacity-45"
+            style={{ background: "transparent", borderColor: selected ? theme.node.text : theme.node.stroke, color: theme.node.text, opacity: disabled ? 0.45 : 1 }}
             onMouseDown={(event) => event.stopPropagation()}
             onClick={onClick}
         >
@@ -256,4 +266,30 @@ function SettingTitle({ children, color }: { children: string; color: string }) 
 
 function alignDimension(value: number, enabled: boolean) {
     return enabled ? Math.ceil(value / DIMENSION_STEP) * DIMENSION_STEP : value;
+}
+
+function isResolutionAllowed(resolution: string, maxSize: string) {
+    const maxRank = imageResolutionRankFromSize(maxSize);
+    return !maxRank || imageResolutionRank(resolution) <= maxRank;
+}
+
+function highestAllowedResolution(maxSize: string) {
+    return [...resolutionOptions].reverse().find((item) => isResolutionAllowed(item.value, maxSize))?.value || "1k";
+}
+
+function imageResolutionRank(value: string) {
+    return ({ "1k": 1, "2k": 2, "4k": 3 } as Record<string, number>)[value] || 1;
+}
+
+function imageResolutionRankFromSize(maxSize: string) {
+    const normalized = maxSize.trim().toLowerCase();
+    if (normalized === "1k") return 1;
+    if (normalized === "2k") return 2;
+    if (normalized === "4k") return 3;
+    const match = maxSize.match(/^(\d+)x(\d+)$/i);
+    if (!match) return 0;
+    const edge = Math.max(Number(match[1]), Number(match[2]));
+    if (edge <= 1024) return 1;
+    if (edge <= 2048) return 2;
+    return 3;
 }

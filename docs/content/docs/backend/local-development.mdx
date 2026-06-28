@@ -38,7 +38,7 @@ http://127.0.0.1:8080
 在 `web` 目录执行：
 
 ```bash
-bun run dev
+NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8080 bun run dev
 ```
 
 前端默认访问：
@@ -47,7 +47,7 @@ bun run dev
 http://localhost:3000
 ```
 
-开发代理默认转发到 `http://127.0.0.1:8080`。如果你的后端端口不同，启动前设置 `API_BASE_URL`。
+前端通过 `NEXT_PUBLIC_API_BASE_URL` 访问后端。如果你的后端端口不同，把这个变量改成实际后端地址。
 
 ## 4. 启动文档站
 

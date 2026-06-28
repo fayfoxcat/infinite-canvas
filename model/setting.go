@@ -38,20 +38,30 @@ type ModelTypeRules struct {
 
 // PublicModelChannelSetting 公开模型渠道配置。
 type PublicModelChannelSetting struct {
-	AvailableModels    []string      `json:"availableModels"`
-	TextModels         []string      `json:"textModels"`
-	ImageModels        []string      `json:"imageModels"`
-	VideoModels        []string      `json:"videoModels"`
-	AudioModels        []string      `json:"audioModels"`
-	ModelCosts         []ModelCost   `json:"modelCosts"`
-	DefaultModel       string        `json:"defaultModel"`
-	DefaultImageModel  string        `json:"defaultImageModel"`
-	DefaultVideoModel  string        `json:"defaultVideoModel"`
-	DefaultTextModel   string        `json:"defaultTextModel"`
-	DefaultAudioModel  string        `json:"defaultAudioModel"`
-	SystemPrompt       string        `json:"systemPrompt"`
-	AllowCustomChannel *bool         `json:"allowCustomChannel"`
-	ModelTypeRules     ModelTypeRules `json:"modelTypeRules"`
+	AvailableModels    []string          `json:"availableModels"`
+	TextModels         []string          `json:"textModels"`
+	ImageModels        []string          `json:"imageModels"`
+	VideoModels        []string          `json:"videoModels"`
+	AudioModels        []string          `json:"audioModels"`
+	ModelInfos         []PublicModelInfo `json:"modelInfos"`
+	ModelCosts         []ModelCost       `json:"modelCosts"`
+	DefaultModel       string            `json:"defaultModel"`
+	DefaultImageModel  string            `json:"defaultImageModel"`
+	DefaultVideoModel  string            `json:"defaultVideoModel"`
+	DefaultTextModel   string            `json:"defaultTextModel"`
+	DefaultAudioModel  string            `json:"defaultAudioModel"`
+	SystemPrompt       string            `json:"systemPrompt"`
+	AllowCustomChannel *bool             `json:"allowCustomChannel"`
+	ModelTypeRules     ModelTypeRules    `json:"modelTypeRules"`
+}
+
+type PublicModelInfo struct {
+	Value       string `json:"value"`
+	Provider    string `json:"provider"`
+	Model       string `json:"model"`
+	DisplayName string `json:"displayName"`
+	Type        string `json:"type"`
+	MaxSize     string `json:"maxSize"`
 }
 
 // PublicSetting 公开配置。

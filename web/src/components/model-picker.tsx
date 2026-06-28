@@ -5,7 +5,7 @@ import { Cpu } from "lucide-react";
 
 import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { selectableModelsByCapability, type AiConfig, type ModelCapability } from "@/stores/use-config-store";
+import { modelDisplayName, modelInfoForModel, modelOptionRawName, selectableModelsByCapability, splitModelOptionValue, type AiConfig, type ModelCapability } from "@/stores/use-config-store";
 
 type ModelPickerProps = {
     config: AiConfig;
@@ -52,10 +52,10 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
                 )}
                 onMouseDown={(event) => event.stopPropagation()}
                 onPointerDown={(event) => event.stopPropagation()}
-                title={current || placeholder}
+                title={current ? modelDisplayName(config, current) : placeholder}
             >
                 <ModelIcon model={current} />
-                <span className="canvas-model-picker-text min-w-0 flex-1 truncate text-left">{current || placeholder}</span>
+                <span className="canvas-model-picker-text min-w-0 flex-1 truncate text-left">{current ? modelDisplayName(config, current) : placeholder}</span>
             </SelectTrigger>
             <SelectContent
                 data-canvas-no-zoom
@@ -70,7 +70,7 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
                 {options.length ? (
                     options.map((model) => (
                         <SelectItem key={model} value={model} textValue={model}>
-                            <ModelLabel model={model} />
+                            <ModelLabel config={config} model={model} />
                         </SelectItem>
                     ))
                 ) : (
@@ -90,11 +90,18 @@ function emptyModelLabel(config: AiConfig, capability?: ModelCapability) {
     return config.models.length ? `暂无匹配的${label}模型` : "请先到配置里拉取模型列表";
 }
 
-function ModelLabel({ model }: { model: string }) {
+function ModelLabel({ config, model }: { config: AiConfig; model: string }) {
+    const displayName = modelDisplayName(config, model);
+    const info = modelInfoForModel(config, model);
+    const selected = splitModelOptionValue(model);
+    const provider = info?.provider || selected.provider;
+    const rawModel = info?.model || selected.model;
+    const secondary = provider ? `${provider} / ${rawModel}` : rawModel;
     return (
         <span className="flex min-w-0 items-center gap-2">
             <ModelIcon model={model} />
-            <span className="truncate">{model}</span>
+            <span className="min-w-0 truncate">{displayName}</span>
+            {secondary && secondary !== displayName ? <span className="min-w-0 shrink truncate text-xs opacity-55">{secondary}</span> : null}
         </span>
     );
 }
@@ -105,7 +112,7 @@ function ModelIcon({ model }: { model: string }) {
 }
 
 function resolveModelIcon(model: string) {
-    const name = model.toLowerCase();
+    const name = modelOptionRawName(model).toLowerCase();
     if (name.includes("claude") || name.includes("anthropic")) return "/icons/claude.svg";
     if (name.includes("gemini") || name.includes("google")) return "/icons/gemini.svg";
     if (name.includes("gpt") || name.includes("openai")) return "/icons/openai.svg";

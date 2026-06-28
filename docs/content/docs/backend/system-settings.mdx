@@ -17,16 +17,31 @@ description: settings 表中 public 和 private 配置结构说明
 ```json
 {
   "modelChannel": {
-    "availableModels": ["gpt-5.5", "gpt-image-2"],
-    "modelCosts": [
-      { "model": "gpt-5.5", "credits": 1 },
-      { "model": "gpt-image-2", "credits": 10 }
+    "availableModels": ["默认渠道::gpt-5.5", "图片渠道::gpt-image-2"],
+    "textModels": ["默认渠道::gpt-5.5"],
+    "imageModels": ["图片渠道::gpt-image-2"],
+    "videoModels": [],
+    "audioModels": [],
+    "modelInfos": [
+      { "value": "图片渠道::gpt-image-2", "provider": "图片渠道", "model": "gpt-image-2", "displayName": "GPT Image 2", "type": "image", "maxSize": "2k" }
     ],
-    "defaultModel": "gpt-image-2",
-    "defaultImageModel": "gpt-image-2",
-    "defaultTextModel": "gpt-5.5",
+    "modelCosts": [
+      { "model": "默认渠道::gpt-5.5", "credits": 1 },
+      { "model": "图片渠道::gpt-image-2", "credits": 10 }
+    ],
+    "defaultModel": "默认渠道::gpt-5.5",
+    "defaultImageModel": "图片渠道::gpt-image-2",
+    "defaultVideoModel": "",
+    "defaultTextModel": "默认渠道::gpt-5.5",
+    "defaultAudioModel": "",
     "systemPrompt": "",
-    "allowCustomChannel": true
+    "allowCustomChannel": true,
+    "modelTypeRules": {
+      "textModels": "gpt-*",
+      "imageModels": "gpt-image-*",
+      "videoModels": "seedance-*",
+      "audioModels": "tts-*"
+    }
   },
   "auth": {
     "allowRegister": true,
@@ -46,27 +61,45 @@ description: settings 表中 public 和 private 配置结构说明
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
-| `availableModels` | string[] | 系统可用模型；保存设置时会自动合并所有已启用私有渠道的模型 |
-| `modelCosts` | object[] | 模型算力点配置，后端模型接口调用前按模型预扣，上游失败时返还；未配置默认不扣除 |
+| `availableModels` | string[] | 系统可用模型选项值；后台渠道模型会按 `服务商::模型名` 暴露，避免不同服务商的同名模型被合并 |
+| `textModels` | string[] | 可用于文本能力的模型选项值列表 |
+| `imageModels` | string[] | 可用于图片能力的模型选项值列表 |
+| `videoModels` | string[] | 可用于视频能力的模型选项值列表 |
+| `audioModels` | string[] | 可用于音频能力的模型选项值列表 |
+| `modelInfos` | object[] | 前端可读取的模型展示元信息，来自后台模型清单 |
+| `modelCosts` | object[] | 模型算力点配置，后端模型接口调用前按模型选项值预扣，上游失败时返还；未配置默认不扣除 |
 | `defaultModel` | string | 默认模型，从 `availableModels` 中选择；为空或失效时优先选择文本模型 |
-| `defaultImageModel` | string | 默认图片模型，从 `availableModels` 中选择；为空或失效时优先选择 `seedream`、`image`、`gpt-image` 模型 |
-| `defaultVideoModel` | string | 默认视频模型，从 `availableModels` 中选择；为空或失效时优先选择 `seedance`、`video` 模型 |
-| `defaultTextModel` | string | 默认文本模型，从 `availableModels` 中选择；为空或失效时优先选择非图片/视频模型 |
+| `defaultImageModel` | string | 默认图片模型，从 `imageModels` 中选择 |
+| `defaultVideoModel` | string | 默认视频模型，从 `videoModels` 中选择 |
+| `defaultTextModel` | string | 默认文本模型，从 `textModels` 中选择 |
+| `defaultAudioModel` | string | 默认音频模型，从 `audioModels` 中选择 |
 | `systemPrompt` | string | 系统提示词 |
 | `allowCustomChannel` | boolean | 是否允许用户在配置弹窗中切换为本地直连渠道，默认允许 |
+| `modelTypeRules` | object | 模型类型匹配规则，每行一个 glob 或 `/regex/` |
+
+`modelInfos` 每项字段：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `value` | string | 前端选择器使用的模型选项值，通常是 `服务商::模型名` |
+| `provider` | string | 服务商或渠道名称 |
+| `model` | string | 真实模型名称；后端转发上游接口时使用该值 |
+| `displayName` | string | 前端展示名称 |
+| `type` | string | 模型类型，可用逗号保存多个类型 |
+| `maxSize` | string | 图片模型最大清晰度限制：`auto`、`1k`、`2k`、`4k`，非图片模型可为空 |
 
 `modelCosts` 每项字段：
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
-| `model` | string | 模型名称 |
+| `model` | string | 模型选项值，后台渠道通常为 `服务商::模型名` |
 | `credits` | number | 每次后端模型接口调用前预扣的算力点 |
 
 用户侧请求模式：
 
 | 模式 | 说明 |
 | --- | --- |
-| 云端渠道 | 使用后端 `/api/v1/*` 代理接口，请求会按模型名匹配 `private.value.channels` 中的可用渠道 |
+| 云端渠道 | 使用后端 `/api/v1/*` 代理接口，请求会按模型选项值解析服务商和真实模型名，再匹配 `private.value.channels` 中的可用渠道 |
 | 本地直连 | 默认可选；`allowCustomChannel` 关闭后不可选，用户在浏览器本地配置 `baseUrl`、`apiKey` 和模型列表后直接请求模型接口 |
 
 `auth` 字段：
@@ -87,6 +120,7 @@ description: settings 表中 public 和 private 配置结构说明
       "baseUrl": "https://api.example.com",
       "apiKey": "sk-xxx",
       "models": ["gpt-5.5", "gpt-image-2"],
+      "type": "",
       "weight": 1,
       "enabled": true,
       "remark": ""
@@ -113,11 +147,12 @@ description: settings 表中 public 和 private 配置结构说明
 | `baseUrl` | string | OpenAI 兼容接口地址 |
 | `apiKey` | string | 渠道密钥 |
 | `models` | string[] | 该渠道可用模型 |
+| `type` | string | 渠道模型默认类型：`text`、`image`、`video`、`audio`，空值表示按规则自动识别 |
 | `weight` | number | 渠道权重；同一模型有多个可用渠道时按权重随机 |
 | `enabled` | boolean | 是否启用 |
 | `remark` | string | 备注 |
 
-后端调用模型时，会从已启用、已配置 `baseUrl` 和 `apiKey`、且 `models` 包含目标模型的渠道中选择一个。
+后端调用模型时，会先检查后台模型清单中该模型是否启用，再从已启用、已配置 `baseUrl` 和 `apiKey`、且 `models` 包含目标模型的渠道中选择一个。
 
 `promptSync` 字段：
 

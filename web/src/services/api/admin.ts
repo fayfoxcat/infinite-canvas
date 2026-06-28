@@ -1,4 +1,4 @@
-import { apiDelete, apiGet, apiPost, compactApiParams } from "@/services/api/request";
+import { apiDelete, apiGet, apiPost, apiPut, compactApiParams } from "@/services/api/request";
 import type { Prompt, PromptListResponse } from "@/services/api/prompts";
 
 export type AdminPromptCategory = {
@@ -175,12 +175,22 @@ export type AdminModelTypeRules = {
     audioModels: string;
 };
 
+export type AdminPublicModelInfo = {
+    value?: string;
+    provider?: string;
+    model: string;
+    displayName: string;
+    type: string;
+    maxSize: string;
+};
+
 export type AdminPublicModelChannelSettings = {
     availableModels: string[];
     textModels: string[];
     imageModels: string[];
     videoModels: string[];
     audioModels: string[];
+    modelInfos: AdminPublicModelInfo[];
     modelCosts: AdminModelCost[];
     defaultModel: string;
     defaultImageModel: string;
@@ -237,15 +247,10 @@ export async function saveAdminSettings(token: string, settings: AdminSettings) 
 export type AdminChannelActionRequest = {
     index?: number;
     channel: AdminModelChannel;
-    model?: string;
 };
 
 export async function fetchChannelModels(token: string, payload: AdminChannelActionRequest) {
     return apiPost<string[]>("/api/admin/settings/channel-models", payload, token);
-}
-
-export async function testChannelModel(token: string, payload: AdminChannelActionRequest) {
-    return apiPost<string>("/api/admin/settings/channel-test", payload, token);
 }
 
 // --- 模型管理 ---
@@ -286,7 +291,7 @@ export async function saveAdminModel(token: string, payload: Partial<AdminModelI
 }
 
 export async function updateAdminModelSort(token: string, orders: { id: number; sortOrder: number }[]) {
-    return apiPost<boolean>("/api/admin/models/sort", { orders }, token);
+    return apiPut<boolean>("/api/admin/models/sort", { orders }, token);
 }
 
 export async function toggleAdminModel(token: string, id: number, enabled: boolean) {
@@ -297,6 +302,6 @@ export async function deleteAdminModel(token: string, id: number) {
     return apiDelete<boolean>(`/api/admin/models/${encodeURIComponent(id)}`, token);
 }
 
-export async function syncAdminModels(token: string) {
+export async function refreshAdminModelCatalog(token: string) {
     return apiPost<{ synced: number }>("/api/admin/models/sync", {}, token);
 }

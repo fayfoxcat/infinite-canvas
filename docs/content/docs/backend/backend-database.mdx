@@ -24,6 +24,8 @@ description: 当前后端主要数据表与字段说明
 - `prompts`
 - `assets`
 - `settings`
+- `image_tasks`
+- `model_infos`
 
 后续新增表时再同步补充本文档，未实际使用的规划表不提前写入。
 
@@ -116,20 +118,38 @@ description: 当前后端主要数据表与字段说明
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
-| `availableModels` | string[] | 系统可用模型列表 |
-| `modelCosts` | object[] | 模型算力点配置 |
+| `availableModels` | string[] | 系统可用模型选项值列表；后台渠道模型使用 `服务商::模型名`，避免不同服务商同名模型被合并 |
+| `textModels` | string[] | 可用于文本能力的模型选项值列表 |
+| `imageModels` | string[] | 可用于图片能力的模型选项值列表 |
+| `videoModels` | string[] | 可用于视频能力的模型选项值列表 |
+| `audioModels` | string[] | 可用于音频能力的模型选项值列表 |
+| `modelInfos` | object[] | 前端可读取的模型展示元信息，来自后台模型清单 |
+| `modelCosts` | object[] | 模型算力点配置，后台渠道按模型选项值记录 |
 | `defaultModel` | string | 默认模型 |
 | `defaultImageModel` | string | 默认图片模型 |
 | `defaultVideoModel` | string | 默认视频模型 |
 | `defaultTextModel` | string | 默认文本模型 |
+| `defaultAudioModel` | string | 默认音频模型 |
 | `systemPrompt` | string | 系统提示词 |
 | `allowCustomChannel` | bool | 是否允许用户自定义渠道，默认允许，关闭后前端只提供走后端渠道的模式 |
+| `modelTypeRules` | object | 模型类型匹配规则，支持 glob 和 `/regex/` |
+
+`modelInfos` 每项字段：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `value` | string | 前端选择器使用的模型选项值，通常是 `服务商::模型名` |
+| `provider` | string | 服务商或渠道名称 |
+| `model` | string | 真实模型名称；后端转发上游接口时使用该值 |
+| `displayName` | string | 前端展示名称，未设置时等于模型名称 |
+| `type` | string | 模型类型，可用逗号保存多个类型 |
+| `maxSize` | string | 图片模型最大清晰度限制：`auto`、`1k`、`2k`、`4k`，非图片模型可为空 |
 
 `modelCosts` 每项字段：
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
-| `model` | string | 模型名称 |
+| `model` | string | 模型选项值，后台渠道通常为 `服务商::模型名` |
 | `credits` | number | 每次后端模型接口调用前预扣的算力点，未配置默认不扣除 |
 
 `auth.linuxDo` 当前字段：
@@ -155,6 +175,7 @@ description: 当前后端主要数据表与字段说明
 | `baseUrl` | string | 渠道接口地址 |
 | `apiKey` | string | 渠道密钥 |
 | `models` | string[] | 渠道可用模型列表 |
+| `type` | string | 渠道模型默认类型：`text`、`image`、`video`、`audio`，空值表示按规则自动识别 |
 | `weight` | number | 渠道权重，同一模型命中多个渠道时按权重随机 |
 | `enabled` | bool | 是否启用 |
 | `remark` | string | 备注 |
@@ -173,7 +194,45 @@ description: 当前后端主要数据表与字段说明
 | `clientId` | string | Linux.do OAuth App Client ID |
 | `clientSecret` | string | Linux.do OAuth App Client Secret，后台返回时隐藏 |
 
-后端请求模型时，先按模型名筛选启用且包含该模型的渠道，再按 `weight` 加权随机选择一个渠道。
+后端请求模型时，先按前端传入的 `服务商::模型名` 定位服务商和真实模型名，再检查 `model_infos` 中对应服务商模型是否被禁用，最后按 `weight` 加权选择匹配渠道；转发上游接口前会把请求体里的模型值还原为真实模型名。公开模型列表会优先使用后台模型清单的启用状态、排序、类型、展示名称和图片最大尺寸；尚未同步进模型清单的渠道模型仍会按渠道配置临时展示。
+
+### image_tasks
+
+异步图片生成任务表。后端创建任务后立即返回任务 ID，由后台 goroutine 调用上游接口，前端轮询任务状态和结果。
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `id` | string | 主键 |
+| `user_id` | string | 发起任务的用户 ID |
+| `model_name` | string | 使用的模型选项值，后台渠道通常为 `服务商::模型名` |
+| `status` | string | 任务状态：`pending`、`running`、`completed`、`failed` |
+| `request_body` | text | 原始请求体，仅后端使用 |
+| `content_type` | string | 原始请求 Content-Type |
+| `result_data` | text | 旧版直接保存的结果 JSON，兼容兜底 |
+| `result_files` | text | 结果文件相对路径 JSON 数组 |
+| `error_msg` | text | 失败原因 |
+| `credits` | number | 本任务预扣算力点 |
+| `created_at` | string | 创建时间 |
+| `updated_at` | string | 更新时间 |
+
+### model_infos
+
+模型清单表。后台从已启用渠道的模型列表同步生成，也支持在后台调整展示名称、类型、尺寸限制、排序和启用状态；同一服务商下模型名称唯一，不同服务商可以记录同名模型。
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `id` | number | 自增主键 |
+| `provider` | string | 服务商或渠道名称，与 `model` 组成唯一索引 |
+| `model` | string | 模型名称，与 `provider` 组成唯一索引 |
+| `display_name` | string | 后台和前端可展示的模型名称 |
+| `type` | string | 模型类型：`text`、`image`、`video`、`audio`，可用逗号保存多个类型 |
+| `max_size` | string | 图片模型最大清晰度限制：`auto`、`1k`、`2k`、`4k`，非图片模型可为空 |
+| `call_count` | number | 调用次数统计 |
+| `success_count` | number | 成功次数统计 |
+| `sort_order` | number | 后台排序值 |
+| `enabled` | bool | 是否启用 |
+| `created_at` | string | 创建时间 |
+| `updated_at` | string | 更新时间 |
 
 ### credit_logs
 

@@ -50,7 +50,7 @@ func AIVideoContent(w http.ResponseWriter, r *http.Request, id string) {
 
 // asyncImageGeneration 创建异步图片生成任务，绕过 Cloudflare 100s 代理超时。
 func asyncImageGeneration(w http.ResponseWriter, r *http.Request) {
-	body, contentType, modelName, err := readAIRequest(r)
+	body, contentType, modelSelection, err := readAIRequest(r)
 	if err != nil {
 		log.Printf("async image generation read failed: %v", err)
 		Fail(w, "AI 接口请求失败")
@@ -61,14 +61,20 @@ func asyncImageGeneration(w http.ResponseWriter, r *http.Request) {
 		Fail(w, "未登录或权限不足")
 		return
 	}
-	credits, err := service.ModelCost(modelName)
+	credits, err := service.ModelCost(modelSelection)
 	if err != nil {
-		log.Printf("async image read model cost failed: model=%s err=%v", modelName, err)
+		log.Printf("async image read model cost failed: modelSelection=%s err=%v", modelSelection, err)
 		Fail(w, "AI 接口请求失败")
 		return
 	}
 	credits *= readAIRequestCount(body, contentType)
-	taskID, err := service.SubmitImageTask(user.ID, modelName, body, contentType, credits)
+	upstreamBody, upstreamContentType, err := rewriteAIRequestModel(body, contentType, modelSelection)
+	if err != nil {
+		log.Printf("async image rewrite model failed: modelSelection=%s err=%v", modelSelection, err)
+		Fail(w, "AI 接口请求失败")
+		return
+	}
+	taskID, err := service.SubmitImageTask(user.ID, modelSelection, upstreamBody, upstreamContentType, credits)
 	if err != nil {
 		FailError(w, err)
 		return
@@ -173,17 +179,18 @@ func ServeGenerationImage(w http.ResponseWriter, r *http.Request) {
 }
 
 func proxyAIGetRequest(w http.ResponseWriter, r *http.Request, path string) {
-	modelName := r.URL.Query().Get("model")
-	if strings.TrimSpace(modelName) == "" {
-		modelName = "grok-imagine-video"
+	modelSelection := r.URL.Query().Get("model")
+	if strings.TrimSpace(modelSelection) == "" {
+		modelSelection = "grok-imagine-video"
 	}
-	channel, err := service.SelectModelChannel(modelName)
+	rawModelName := service.ModelNameFromSelection(modelSelection)
+	channel, err := service.SelectModelChannel(modelSelection)
 	if err != nil {
-		log.Printf("AI proxy select channel failed: model=%s err=%v", modelName, err)
+		log.Printf("AI proxy select channel failed: modelSelection=%s err=%v", modelSelection, err)
 		Fail(w, "AI 接口请求失败")
 		return
 	}
-	path = resolveAIProxyPath(channel.BaseURL, modelName, path)
+	path = resolveAIProxyPath(channel.BaseURL, rawModelName, path)
 	request, err := http.NewRequest(http.MethodGet, service.BuildModelChannelURL(channel, path), nil)
 	if err != nil {
 		Fail(w, "AI 接口请求失败")
@@ -194,7 +201,7 @@ func proxyAIGetRequest(w http.ResponseWriter, r *http.Request, path string) {
 }
 
 func proxyAIRequest(w http.ResponseWriter, r *http.Request, path string) {
-	body, contentType, modelName, err := readAIRequest(r)
+	body, contentType, modelSelection, err := readAIRequest(r)
 	if err != nil {
 		log.Printf("AI proxy request read failed: %v", err)
 		Fail(w, "AI 接口请求失败")
@@ -205,37 +212,44 @@ func proxyAIRequest(w http.ResponseWriter, r *http.Request, path string) {
 		Fail(w, "未登录或权限不足")
 		return
 	}
-	credits, err := service.ModelCost(modelName)
+	credits, err := service.ModelCost(modelSelection)
 	if err != nil {
-		log.Printf("AI proxy read model cost failed: model=%s err=%v", modelName, err)
+		log.Printf("AI proxy read model cost failed: modelSelection=%s err=%v", modelSelection, err)
 		Fail(w, "AI 接口请求失败")
 		return
 	}
 	credits *= readAIRequestCount(body, contentType)
-	channel, err := service.SelectModelChannel(modelName)
+	channel, err := service.SelectModelChannel(modelSelection)
 	if err != nil {
-		log.Printf("AI proxy select channel failed: model=%s err=%v", modelName, err)
+		log.Printf("AI proxy select channel failed: modelSelection=%s err=%v", modelSelection, err)
 		Fail(w, "AI 接口请求失败")
 		return
 	}
-	path = resolveAIProxyPath(channel.BaseURL, modelName, path)
-	request, err := http.NewRequest(http.MethodPost, service.BuildModelChannelURL(channel, path), bytes.NewReader(body))
+	rawModelName := service.ModelNameFromSelection(modelSelection)
+	upstreamBody, upstreamContentType, err := rewriteAIRequestModel(body, contentType, modelSelection)
+	if err != nil {
+		log.Printf("AI proxy rewrite model failed: modelSelection=%s err=%v", modelSelection, err)
+		Fail(w, "AI 接口请求失败")
+		return
+	}
+	path = resolveAIProxyPath(channel.BaseURL, rawModelName, path)
+	request, err := http.NewRequest(http.MethodPost, service.BuildModelChannelURL(channel, path), bytes.NewReader(upstreamBody))
 	if err != nil {
 		log.Printf("AI proxy build request failed: url=%s err=%v", service.BuildModelChannelURL(channel, path), err)
 		Fail(w, "AI 接口请求失败")
 		return
 	}
 	request.Header.Set("Authorization", "Bearer "+channel.APIKey)
-	if contentType != "" {
-		request.Header.Set("Content-Type", contentType)
+	if upstreamContentType != "" {
+		request.Header.Set("Content-Type", upstreamContentType)
 	}
-	if err := service.ConsumeUserCredits(user.ID, modelName, credits, path); err != nil {
+	if err := service.ConsumeUserCredits(user.ID, modelSelection, credits, path); err != nil {
 		FailError(w, err)
 		return
 	}
 	copyAIResponse(w, request, func() {
-		if err := service.RefundUserCredits(user.ID, modelName, credits, path); err != nil {
-			log.Printf("AI proxy refund credits failed: user=%s model=%s credits=%d err=%v", user.ID, modelName, credits, err)
+		if err := service.RefundUserCredits(user.ID, modelSelection, credits, path); err != nil {
+			log.Printf("AI proxy refund credits failed: user=%s modelSelection=%s credits=%d err=%v", user.ID, modelSelection, credits, err)
 		}
 	})
 }
@@ -286,20 +300,98 @@ func readAIRequest(r *http.Request) ([]byte, string, string, error) {
 	if err != nil {
 		return nil, "", "", err
 	}
-	modelName := ""
+	modelSelection := ""
 	if strings.HasPrefix(contentType, "multipart/form-data") {
-		modelName = readMultipartModel(body, contentType)
+		modelSelection = readMultipartModel(body, contentType)
 	} else {
 		var payload struct {
 			Model string `json:"model"`
 		}
 		_ = json.Unmarshal(body, &payload)
-		modelName = payload.Model
+		modelSelection = payload.Model
 	}
-	if strings.TrimSpace(modelName) == "" {
+	if strings.TrimSpace(modelSelection) == "" {
 		return nil, "", "", errMissingModel
 	}
-	return body, contentType, modelName, nil
+	return body, contentType, modelSelection, nil
+}
+
+func rewriteAIRequestModel(body []byte, contentType string, modelSelection string) ([]byte, string, error) {
+	rawModelName := service.ModelNameFromSelection(modelSelection)
+	if strings.TrimSpace(rawModelName) == "" || rawModelName == strings.TrimSpace(modelSelection) {
+		return body, contentType, nil
+	}
+	if strings.HasPrefix(contentType, "multipart/form-data") {
+		return rewriteMultipartModel(body, contentType, rawModelName)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, "", err
+	}
+	payload["model"] = rawModelName
+	nextBody, err := json.Marshal(payload)
+	if err != nil {
+		return nil, "", err
+	}
+	return nextBody, contentType, nil
+}
+
+func rewriteMultipartModel(body []byte, contentType string, rawModelName string) ([]byte, string, error) {
+	_, params, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		return nil, "", err
+	}
+	reader := multipart.NewReader(bytes.NewReader(body), params["boundary"])
+	form, err := reader.ReadForm(32 << 20)
+	if err != nil {
+		return nil, "", err
+	}
+	defer form.RemoveAll()
+
+	var buffer bytes.Buffer
+	writer := multipart.NewWriter(&buffer)
+	for key, values := range form.Value {
+		if key == "model" {
+			values = []string{rawModelName}
+		}
+		for _, value := range values {
+			if err := writer.WriteField(key, value); err != nil {
+				_ = writer.Close()
+				return nil, "", err
+			}
+		}
+	}
+	if _, ok := form.Value["model"]; !ok {
+		if err := writer.WriteField("model", rawModelName); err != nil {
+			_ = writer.Close()
+			return nil, "", err
+		}
+	}
+	for _, files := range form.File {
+		for _, fileHeader := range files {
+			file, err := fileHeader.Open()
+			if err != nil {
+				_ = writer.Close()
+				return nil, "", err
+			}
+			part, err := writer.CreatePart(fileHeader.Header)
+			if err != nil {
+				file.Close()
+				_ = writer.Close()
+				return nil, "", err
+			}
+			if _, err := io.Copy(part, file); err != nil {
+				file.Close()
+				_ = writer.Close()
+				return nil, "", err
+			}
+			file.Close()
+		}
+	}
+	if err := writer.Close(); err != nil {
+		return nil, "", err
+	}
+	return buffer.Bytes(), writer.FormDataContentType(), nil
 }
 
 func readMultipartModel(body []byte, contentType string) string {

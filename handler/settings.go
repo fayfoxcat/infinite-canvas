@@ -13,7 +13,6 @@ import (
 type adminChannelActionRequest struct {
 	Index   *int               `json:"index"`
 	Channel model.ModelChannel `json:"channel"`
-	Model   string             `json:"model"`
 }
 
 func Settings(w http.ResponseWriter, r *http.Request) {
@@ -54,17 +53,6 @@ func AdminChannelModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	OK(w, models)
-}
-
-func AdminTestChannelModel(w http.ResponseWriter, r *http.Request) {
-	var request adminChannelActionRequest
-	_ = json.NewDecoder(r.Body).Decode(&request)
-	result, err := service.AdminTestChannelModel(request.Index, request.Channel, request.Model)
-	if err != nil {
-		FailError(w, err)
-		return
-	}
-	OK(w, result)
 }
 
 // --- 模型管理 ---
