@@ -2,19 +2,45 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"mime"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/basketikun/infinite-canvas/model"
 	"github.com/basketikun/infinite-canvas/service"
 )
+
+// proxyHTTPClient 用于同步 AI 代理请求。
+// 使用独立 DNS resolver 直连 119.29.29.29（腾讯 DNSPod），避免容器继承宿主机
+// 路由器 DNS 时遭遇域名劫持。超时设为 10 分钟以支持长时间 AI 生成请求。
+var proxyHTTPClient = &http.Client{
+	Transport: &http.Transport{
+		DialContext: (&net.Dialer{
+			Timeout:   30 * time.Second,
+			KeepAlive: 30 * time.Second,
+			Resolver: &net.Resolver{
+				PreferGo: true,
+				Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+					d := net.Dialer{Timeout: 10 * time.Second}
+					return d.DialContext(ctx, "udp", "119.29.29.29:53")
+				},
+			},
+		}).DialContext,
+		TLSHandshakeTimeout:   15 * time.Second,
+		ResponseHeaderTimeout: 10 * time.Minute,
+		IdleConnTimeout:       90 * time.Second,
+	},
+	Timeout: 10 * time.Minute,
+}
 
 func AIImagesGenerations(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("async") == "1" {
@@ -255,7 +281,7 @@ func proxyAIRequest(w http.ResponseWriter, r *http.Request, path string) {
 }
 
 func copyAIResponse(w http.ResponseWriter, request *http.Request, onFailure func()) {
-	response, err := http.DefaultClient.Do(request)
+	response, err := proxyHTTPClient.Do(request)
 	if err != nil {
 		log.Printf("AI proxy request failed: url=%s err=%v", request.URL.String(), err)
 		if onFailure != nil {
@@ -268,7 +294,7 @@ func copyAIResponse(w http.ResponseWriter, request *http.Request, onFailure func
 
 	if response.StatusCode >= http.StatusBadRequest {
 		body, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
-		log.Printf("AI upstream error: url=%s status=%d", request.URL.String(), response.StatusCode)
+		log.Printf("AI upstream error: url=%s status=%d body=%s", request.URL.String(), response.StatusCode, logTruncate(body))
 		if onFailure != nil {
 			onFailure()
 		}
@@ -533,6 +559,16 @@ func safeUpstreamText(text string) string {
 	runes := []rune(text)
 	if len(runes) > 300 {
 		return string(runes[:300]) + "..."
+	}
+	return text
+}
+
+// logTruncate 截断日志内容，避免上游返回过长响应体撑爆日志。
+func logTruncate(body []byte) string {
+	text := strings.Join(strings.Fields(strings.TrimSpace(string(body))), " ")
+	runes := []rune(text)
+	if len(runes) > 200 {
+		return string(runes[:200]) + "..."
 	}
 	return text
 }
