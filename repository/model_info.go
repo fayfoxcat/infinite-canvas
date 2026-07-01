@@ -76,7 +76,7 @@ func GetModelInfoByProviderModel(provider string, modelName string) (model.Model
 	return item, item.ID > 0, nil
 }
 
-// UpsertModelInfo 按 provider + model 字段 upsert。
+// UpsertModelInfo 按 model 字段 upsert（model 有全局唯一索引）。
 func UpsertModelInfo(info *model.ModelInfo) error {
 	db, err := DB()
 	if err != nil {
@@ -89,22 +89,17 @@ func UpsertModelInfo(info *model.ModelInfo) error {
 	if info.Model == "" {
 		return safeError{message: "模型名称不能为空"}
 	}
+	// 按 model 查找已有记录（model 是全局唯一索引），不同 provider 的同名模型视为同一条。
 	var existing model.ModelInfo
-	if info.ID > 0 {
-		if err := db.Where("provider = ? AND model = ? AND id <> ?", info.Provider, info.Model, info.ID).Limit(1).Find(&existing).Error; err != nil {
-			return safeError{message: fmt.Sprintf("查询模型失败：%v", err)}
-		}
-		if existing.ID > 0 {
-			return safeError{message: "同一服务商下模型名称不能重复"}
-		}
-	} else {
-		if err := db.Where("provider = ? AND model = ?", info.Provider, info.Model).Limit(1).Find(&existing).Error; err != nil {
-			return safeError{message: fmt.Sprintf("查询模型失败：%v", err)}
-		}
-		if existing.ID > 0 {
-			info.ID = existing.ID
-			info.CreatedAt = existing.CreatedAt
-		}
+	if err := db.Where("model = ?", info.Model).Limit(1).Find(&existing).Error; err != nil {
+		return safeError{message: fmt.Sprintf("查询模型失败：%v", err)}
+	}
+	if existing.ID > 0 {
+		// 已有记录：保留统计数据和创建时间，更新其他字段
+		info.ID = existing.ID
+		info.CallCount = existing.CallCount
+		info.SuccessCount = existing.SuccessCount
+		info.CreatedAt = existing.CreatedAt
 	}
 	if err := db.Save(info).Error; err != nil {
 		return safeError{message: fmt.Sprintf("保存模型失败：%v", err)}
