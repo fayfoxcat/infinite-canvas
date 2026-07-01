@@ -238,5 +238,26 @@ func IncrementModelStats(modelName string, success bool) error {
 	if success {
 		updates["success_count"] = gorm.Expr("success_count + 1")
 	}
-	return db.Model(&model.ModelInfo{}).Where("model = ?", modelName).UpdateColumns(updates).Error
+	result := db.Model(&model.ModelInfo{}).Where("model = ?", modelName).UpdateColumns(updates)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		// modelName 可能是 "provider::model" 格式，尝试提取纯模型名
+		if _, rawName := parseModelSelection(modelName); rawName != modelName {
+			return db.Model(&model.ModelInfo{}).Where("model = ?", rawName).UpdateColumns(updates).Error
+		}
+	}
+	return nil
+}
+
+// parseModelSelection 分离 provider::model 格式。
+func parseModelSelection(value string) (string, string) {
+	value = strings.TrimSpace(value)
+	const sep = "::"
+	index := strings.Index(value, sep)
+	if index <= 0 || index+len(sep) >= len(value) {
+		return "", value
+	}
+	return strings.TrimSpace(value[:index]), strings.TrimSpace(value[index+len(sep):])
 }
