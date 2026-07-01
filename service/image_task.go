@@ -157,6 +157,7 @@ func executeImageTask(taskID string) {
 	httpElapsed := time.Since(t0)
 	if err != nil {
 		log.Printf("image task http error: taskID=%s elapsed=%v err=%v", taskID, httpElapsed, err)
+		repository.IncrementModelStats(task.ModelName, false)
 		failImageTask(&task, "上游接口无响应或网络不可达", true)
 		return
 	}
@@ -172,9 +173,12 @@ func executeImageTask(taskID string) {
 		if detail != "" {
 			msg = msg + "：" + detail
 		}
+		repository.IncrementModelStats(task.ModelName, false)
 		failImageTask(&task, msg, true)
 		return
 	}
+
+	repository.IncrementModelStats(task.ModelName, true)
 
 	// 成功：保存图片到文件系统
 	resultFiles, saveErr := saveResultImages(task.ID, task.UserID, body)

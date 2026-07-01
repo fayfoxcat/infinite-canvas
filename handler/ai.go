@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/basketikun/infinite-canvas/model"
+	"github.com/basketikun/infinite-canvas/repository"
 	"github.com/basketikun/infinite-canvas/service"
 )
 
@@ -223,7 +224,7 @@ func proxyAIGetRequest(w http.ResponseWriter, r *http.Request, path string) {
 		return
 	}
 	request.Header.Set("Authorization", "Bearer "+channel.APIKey)
-	copyAIResponse(w, request, nil)
+	copyAIResponse(w, request, nil, rawModelName)
 }
 
 func proxyAIRequest(w http.ResponseWriter, r *http.Request, path string) {
@@ -277,16 +278,17 @@ func proxyAIRequest(w http.ResponseWriter, r *http.Request, path string) {
 		if err := service.RefundUserCredits(user.ID, modelSelection, credits, path); err != nil {
 			log.Printf("AI proxy refund credits failed: user=%s modelSelection=%s credits=%d err=%v", user.ID, modelSelection, credits, err)
 		}
-	})
+	}, rawModelName)
 }
 
-func copyAIResponse(w http.ResponseWriter, request *http.Request, onFailure func()) {
+func copyAIResponse(w http.ResponseWriter, request *http.Request, onFailure func(), rawModelName string) {
 	response, err := proxyHTTPClient.Do(request)
 	if err != nil {
 		log.Printf("AI proxy request failed: url=%s err=%v", request.URL.String(), err)
 		if onFailure != nil {
 			onFailure()
 		}
+		repository.IncrementModelStats(rawModelName, false)
 		Fail(w, "AI 接口请求失败")
 		return
 	}
@@ -298,9 +300,12 @@ func copyAIResponse(w http.ResponseWriter, request *http.Request, onFailure func
 		if onFailure != nil {
 			onFailure()
 		}
+		repository.IncrementModelStats(rawModelName, false)
 		Fail(w, aiUpstreamStatusMessage(response.StatusCode, body))
 		return
 	}
+
+	repository.IncrementModelStats(rawModelName, true)
 
 	for key, values := range response.Header {
 		if strings.EqualFold(key, "Content-Length") {

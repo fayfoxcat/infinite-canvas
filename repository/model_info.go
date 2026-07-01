@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/basketikun/infinite-canvas/model"
+	"gorm.io/gorm"
 )
 
 // ListModelInfos 查询模型列表，支持 keyword / type 筛选和分页。
@@ -219,4 +220,23 @@ func normalizeModelInfoTypes(value string) string {
 		return "text"
 	}
 	return strings.Join(result, ",")
+}
+
+// IncrementModelStats 递增模型的调用次数，成功时也递增成功次数。
+func IncrementModelStats(modelName string, success bool) error {
+	db, err := DB()
+	if err != nil {
+		return err
+	}
+	modelName = strings.TrimSpace(modelName)
+	if modelName == "" {
+		return nil
+	}
+	updates := map[string]interface{}{
+		"call_count": gorm.Expr("call_count + 1"),
+	}
+	if success {
+		updates["success_count"] = gorm.Expr("success_count + 1")
+	}
+	return db.Model(&model.ModelInfo{}).Where("model = ?", modelName).UpdateColumns(updates).Error
 }
