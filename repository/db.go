@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -72,8 +73,28 @@ func DB() (*gorm.DB, error) {
 			&model.ImageTask{},
 			&model.ModelInfo{},
 		)
+		if dbErr != nil {
+			return
+		}
+		// 迁移：删除旧版 model 列单独唯一索引（已改为 provider+model 复合唯一索引）
+		dropLegacyModelUniqueIndex(db)
 	})
 	return db, dbErr
+}
+
+// dropLegacyModelUniqueIndex 删除旧版本残留的 model 列单独唯一索引。
+// 索引名取决于 GORM 版本和驱动，尝试多种可能名称。
+func dropLegacyModelUniqueIndex(db *gorm.DB) {
+	mig := db.Migrator()
+	for _, name := range []string{"model", "uni_model_infos_model", "idx_model_infos_model"} {
+		if mig.HasIndex(&model.ModelInfo{}, name) {
+			if err := mig.DropIndex(&model.ModelInfo{}, name); err != nil {
+				log.Printf("drop legacy index %s failed (non-fatal): %v", name, err)
+			} else {
+				log.Printf("dropped legacy unique index: %s", name)
+			}
+		}
+	}
 }
 
 func dialector(driver string, dsn string) gorm.Dialector {

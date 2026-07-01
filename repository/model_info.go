@@ -76,7 +76,7 @@ func GetModelInfoByProviderModel(provider string, modelName string) (model.Model
 	return item, item.ID > 0, nil
 }
 
-// UpsertModelInfo 按 model 字段 upsert（model 有全局唯一索引）。
+// UpsertModelInfo 按 provider + model 组合 upsert。
 func UpsertModelInfo(info *model.ModelInfo) error {
 	db, err := DB()
 	if err != nil {
@@ -89,13 +89,13 @@ func UpsertModelInfo(info *model.ModelInfo) error {
 	if info.Model == "" {
 		return safeError{message: "模型名称不能为空"}
 	}
-	// 按 model 查找已有记录（model 是全局唯一索引），不同 provider 的同名模型视为同一条。
+	// 按 provider + model 查找已有记录
 	var existing model.ModelInfo
-	if err := db.Where("model = ?", info.Model).Limit(1).Find(&existing).Error; err != nil {
+	if err := db.Where("provider = ? AND model = ?", info.Provider, info.Model).Limit(1).Find(&existing).Error; err != nil {
 		return safeError{message: fmt.Sprintf("查询模型失败：%v", err)}
 	}
 	if existing.ID > 0 {
-		// 已有记录：保留统计数据和创建时间，更新其他字段
+		// 已有记录：保留 ID、统计数据和创建时间，更新其他字段
 		info.ID = existing.ID
 		info.CallCount = existing.CallCount
 		info.SuccessCount = existing.SuccessCount
@@ -227,6 +227,7 @@ func normalizeModelInfoTypes(value string) string {
 }
 
 // IncrementModelStats 递增模型的调用次数，成功时也递增成功次数。
+// modelName 可以是纯模型名或 "provider::model" 格式，优先按 provider+model 匹配。
 func IncrementModelStats(modelName string, success bool) error {
 	db, err := DB()
 	if err != nil {
@@ -242,17 +243,20 @@ func IncrementModelStats(modelName string, success bool) error {
 	if success {
 		updates["success_count"] = gorm.Expr("success_count + 1")
 	}
-	result := db.Model(&model.ModelInfo{}).Where("model = ?", modelName).UpdateColumns(updates)
-	if result.Error != nil {
-		return result.Error
-	}
-	if result.RowsAffected == 0 {
-		// modelName 可能是 "provider::model" 格式，尝试提取纯模型名
-		if _, rawName := parseModelSelection(modelName); rawName != modelName {
-			return db.Model(&model.ModelInfo{}).Where("model = ?", rawName).UpdateColumns(updates).Error
+	// 优先按 provider + model 精确匹配
+	provider, rawName := parseModelSelection(modelName)
+	if provider != "" {
+		result := db.Model(&model.ModelInfo{}).Where("provider = ? AND model = ?", provider, rawName).UpdateColumns(updates)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected > 0 {
+			return nil
 		}
 	}
-	return nil
+	// 兜底：按 model 名匹配
+	result := db.Model(&model.ModelInfo{}).Where("model = ?", rawName).UpdateColumns(updates)
+	return result.Error
 }
 
 // parseModelSelection 分离 provider::model 格式。
