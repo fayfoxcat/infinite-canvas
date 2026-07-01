@@ -184,6 +184,13 @@ func executeImageTask(taskID string) {
 	resultFiles, saveErr := saveResultImages(task.ID, task.UserID, body)
 	saveElapsed := time.Since(t0)
 	if saveErr != nil {
+		log.Printf("image task save files failed: taskID=%s elapsed=%v err=%v body=%s", taskID, saveElapsed, saveErr, logTruncateBytes(body))
+		// JSON 解析失败 = 上游返回的不是有效图片响应，应视为失败
+		if isJSONParseError(saveErr) {
+			failImageTask(&task, "上游返回无效响应："+logTruncateBytes(body), true)
+			return
+		}
+		// 文件写入失败：兜底存 DB
 		log.Printf("image task save files failed, falling back to DB: taskID=%s elapsed=%v err=%v", taskID, saveElapsed, saveErr)
 		task.ResultData = string(body)
 	} else {
@@ -331,6 +338,23 @@ func aiStatusMessageForCode(statusCode int) string {
 	default:
 		return "AI 接口请求失败"
 	}
+}
+
+func logTruncateBytes(body []byte) string {
+	text := strings.Join(strings.Fields(strings.TrimSpace(string(body))), " ")
+	runes := []rune(text)
+	if len(runes) > 200 {
+		return string(runes[:200]) + "..."
+	}
+	return text
+}
+
+func isJSONParseError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "json") || strings.Contains(msg, "JSON") || strings.Contains(msg, "unexpected end")
 }
 
 func readUpstreamErrorDetail(body []byte) string {
