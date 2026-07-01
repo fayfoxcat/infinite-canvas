@@ -1,12 +1,18 @@
 package repository
 
 import (
-	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/basketikun/infinite-canvas/model"
 	"gorm.io/gorm"
 )
+
+// safeError 确保错误消息会透传给前端（实现 SafeMessage 接口）。
+type safeError struct{ message string }
+
+func (e safeError) Error() string      { return e.message }
+func (e safeError) SafeMessage() string { return e.message }
 
 // ListModelInfos 查询模型列表，支持 keyword / type 筛选和分页。
 func ListModelInfos(keyword, modelType string, page, pageSize int) ([]model.ModelInfo, int64, error) {
@@ -74,33 +80,36 @@ func GetModelInfoByProviderModel(provider string, modelName string) (model.Model
 func UpsertModelInfo(info *model.ModelInfo) error {
 	db, err := DB()
 	if err != nil {
-		return err
+		return safeError{message: fmt.Sprintf("数据库连接失败：%v", err)}
 	}
 	normalizeModelInfo(info)
 	if info.Provider == "" {
-		return errors.New("服务商不能为空")
+		return safeError{message: "服务商不能为空"}
 	}
 	if info.Model == "" {
-		return errors.New("模型名称不能为空")
+		return safeError{message: "模型名称不能为空"}
 	}
 	var existing model.ModelInfo
 	if info.ID > 0 {
 		if err := db.Where("provider = ? AND model = ? AND id <> ?", info.Provider, info.Model, info.ID).Limit(1).Find(&existing).Error; err != nil {
-			return err
+			return safeError{message: fmt.Sprintf("查询模型失败：%v", err)}
 		}
 		if existing.ID > 0 {
-			return errors.New("同一服务商下模型名称不能重复")
+			return safeError{message: "同一服务商下模型名称不能重复"}
 		}
 	} else {
 		if err := db.Where("provider = ? AND model = ?", info.Provider, info.Model).Limit(1).Find(&existing).Error; err != nil {
-			return err
+			return safeError{message: fmt.Sprintf("查询模型失败：%v", err)}
 		}
 		if existing.ID > 0 {
 			info.ID = existing.ID
 			info.CreatedAt = existing.CreatedAt
 		}
 	}
-	return db.Save(info).Error
+	if err := db.Save(info).Error; err != nil {
+		return safeError{message: fmt.Sprintf("保存模型失败：%v", err)}
+	}
+	return nil
 }
 
 // UpdateModelInfoSort 批量更新排序值。
