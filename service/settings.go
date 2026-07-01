@@ -901,6 +901,24 @@ func modelChannelsForModel(channels []model.ModelChannel, modelSelection string)
 			}
 		}
 	}
+	// 若 provider 过滤后无匹配渠道，去掉 provider 限制重试
+	if len(result) == 0 && providerFilter != "" {
+		for _, channel := range channels {
+			if !channel.Enabled || channel.BaseURL == "" || channel.APIKey == "" {
+				continue
+			}
+			for _, item := range channel.Models {
+				if strings.TrimSpace(item) == modelName {
+					provider := modelChannelProvider(channel)
+					if info, ok := infoByKey[modelInfoKey(provider, modelName)]; ok && !info.Enabled {
+						break
+					}
+					result = append(result, channel)
+					break
+				}
+			}
+		}
+	}
 	return result, nil
 }
 
