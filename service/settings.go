@@ -344,7 +344,11 @@ func SelectModelChannel(modelSelection string) (model.ModelChannel, error) {
 		return model.ModelChannel{}, err
 	}
 	if len(channels) == 0 {
-		return model.ModelChannel{}, errors.New("没有可用模型渠道")
+		providerFilter, modelName := ParseModelSelection(modelSelection)
+		if providerFilter != "" {
+			return model.ModelChannel{}, safeMessageError{message: fmt.Sprintf("未找到服务商 %q 的模型 %q，请确认已配置该服务商的渠道且渠道包含此模型", providerFilter, modelName)}
+		}
+		return model.ModelChannel{}, safeMessageError{message: fmt.Sprintf("未找到可用模型渠道：模型 %q 不属于任何已启用的渠道", modelSelection)}
 	}
 	total := 0
 	for _, channel := range channels {
@@ -898,24 +902,6 @@ func modelChannelsForModel(channels []model.ModelChannel, modelSelection string)
 				}
 				result = append(result, channel)
 				break
-			}
-		}
-	}
-	// 若 provider 过滤后无匹配渠道，去掉 provider 限制重试
-	if len(result) == 0 && providerFilter != "" {
-		for _, channel := range channels {
-			if !channel.Enabled || channel.BaseURL == "" || channel.APIKey == "" {
-				continue
-			}
-			for _, item := range channel.Models {
-				if strings.TrimSpace(item) == modelName {
-					provider := modelChannelProvider(channel)
-					if info, ok := infoByKey[modelInfoKey(provider, modelName)]; ok && !info.Enabled {
-						break
-					}
-					result = append(result, channel)
-					break
-				}
 			}
 		}
 	}
