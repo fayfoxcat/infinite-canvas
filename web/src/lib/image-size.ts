@@ -44,7 +44,7 @@ export function inferImageResolutionFromSize(size: string | undefined) {
 
 export function resolveImageRequestSize(resolution: string | undefined, size: string | undefined) {
     const value = (size || "").trim();
-    if (!value || value.toLowerCase() === "auto") return autoResolutionToSize(resolution);
+    if (!value || value.toLowerCase() === "auto") return undefined;
     const dimensions = parseImageDimensions(value);
     if (dimensions) {
         validateImageSize(dimensions.width, dimensions.height);
@@ -54,13 +54,6 @@ export function resolveImageRequestSize(resolution: string | undefined, size: st
     if (legacy) return resolveRatioSize(legacy.resolution, legacy.ratio);
     if (value.includes(":")) return resolveRatioSize(normalizeImageResolution(resolution || ""), value);
     throw new Error("图像尺寸格式不支持，请使用 auto、9:16 或 1024x1024");
-}
-
-function autoResolutionToSize(resolution: string | undefined) {
-    const res = normalizeImageResolution(resolution);
-    const base = IMAGE_RESOLUTION_BASE[res];
-    if (!base) return undefined;
-    return `${base}x${base}`;
 }
 
 export function resolveImageDisplayDimensions(size: string | undefined, resolution: string | undefined, fallback: { width: number; height: number }) {
