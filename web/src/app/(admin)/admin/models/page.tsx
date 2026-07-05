@@ -1,6 +1,6 @@
 "use client";
 
-import { DeleteOutlined, HolderOutlined, PlusOutlined, ReloadOutlined, SaveOutlined } from "@ant-design/icons";
+import { DeleteOutlined, EditOutlined, HolderOutlined, PlusOutlined, ReloadOutlined, SaveOutlined } from "@ant-design/icons";
 import { App, Button, Card, Checkbox, Col, Drawer, Flex, Form, Input, InputNumber, Modal, Row, Select, Space, Switch, Table, Tag, Typography } from "antd";
 import { createContext, type CSSProperties, type ReactNode, useContext, useEffect, useState } from "react";
 import { DndContext, PointerSensor, useSensor, useSensors, type DragEndEvent, type UniqueIdentifier } from "@dnd-kit/core";
@@ -136,6 +136,8 @@ export default function AdminModelsPage() {
     const [modelsPage, setModelsPage] = useState(1);
     const [modelsLoading, setModelsLoading] = useState(false);
     const [modelDrafts, setModelDrafts] = useState<Record<number, Partial<AdminModelInfo>>>({});
+    const [isEditModelOpen, setIsEditModelOpen] = useState(false);
+    const [editModelForm] = Form.useForm<AdminModelInfo>();
     const pageSizeModels = 30;
     const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
@@ -282,6 +284,29 @@ export default function AdminModelsPage() {
         message.success(`已选择 ${models.length} 个模型`);
     };
 
+    const openEditModel = (record: AdminModelInfo) => {
+        editModelForm.setFieldsValue({
+            ...record,
+            type: normalizeModelTypes(record.type || "text").split(",") as any,
+        });
+        setIsEditModelOpen(true);
+    };
+    const handleEditModel = async () => {
+        if (!token) return;
+        try {
+            const values = await editModelForm.validateFields();
+            const type = Array.isArray(values.type) ? values.type.join(",") : normalizeModelTypes(values.type || "text");
+            await saveAdminModel(token, { ...values, type });
+            message.success("已保存");
+            setIsEditModelOpen(false);
+            await loadModels();
+            await loadAll();
+        } catch (e) {
+            if (e && typeof e === "object" && "errorFields" in e) return;
+            message.error(e instanceof Error ? e.message : "保存失败");
+        }
+    };
+
     const handleSaveModel = async (record: AdminModelInfo) => {
         if (!token) return;
         const providerName = record.provider?.trim();
@@ -371,7 +396,7 @@ export default function AdminModelsPage() {
                         <SortableContext items={modelsList.map((m) => m.id)} strategy={verticalListSortingStrategy}>
                             <Table rowKey="id" loading={modelsLoading} size="small" dataSource={modelsList}
                                 pagination={{ current: modelsPage, pageSize: pageSizeModels, total: modelsTotal, onChange: (p) => setModelsPage(p), showSizeChanger: false, showTotal: (t) => `共 ${t} 个模型` }}
-                                scroll={{ x: 1080 }} components={{ body: { row: DraggableRow as any } }}
+                                scroll={{ x: 1130 }} components={{ body: { row: DraggableRow as any } }}
                                 onRow={(record) => ({ "data-row-key": record.id } as any)}
                                 columns={[
                                     { title: "序号", width: 56, align: "center" as const, render: (_: any, __: any, i: number) => <Space size={4}><Typography.Text type="secondary" style={{ fontSize: 12 }}>{(modelsPage - 1) * pageSizeModels + i + 1}</Typography.Text><DragHandle /></Space> },
@@ -403,9 +428,10 @@ export default function AdminModelsPage() {
                                     { title: "调用", dataIndex: "callCount", width: 82, align: "center" as const, render: (v: number) => <Typography.Text type="secondary" style={{ fontSize: 12 }}>{v.toLocaleString()}</Typography.Text> },
                                     { title: "成功率", dataIndex: "successCount", width: 82, align: "center" as const,
                                         render: (v: number, r: AdminModelInfo) => <Typography.Text type="secondary" style={{ fontSize: 12 }}>{r.callCount > 0 ? `${((v / r.callCount) * 100).toFixed(0)}%` : "-"}</Typography.Text> },
-                                    { title: "操作", width: 130, align: "center" as const, fixed: "right" as const, render: (_: any, r: AdminModelInfo) => (
+                                    { title: "操作", width: 176, align: "center" as const, fixed: "right" as const, render: (_: any, r: AdminModelInfo) => (
                                         <Space size={2}>
                                             <Switch size="small" checked={r.enabled} onChange={(v) => handleToggleModel(r.id, v)} />
+                                            <Button size="small" type="link" onClick={() => openEditModel(r)}>编辑</Button>
                                             <Button size="small" type="link" disabled={!modelDraftChanged(r)} onClick={() => void handleSaveModel(modelWithDraft(r))}>保存</Button>
                                             <Button size="small" type="link" danger onClick={() => handleDeleteModel(r.id, r.model)}>删除</Button>
                                         </Space>
@@ -487,6 +513,26 @@ export default function AdminModelsPage() {
                     </Row>
                 </Form>
             </Drawer>
+
+            <Modal title="编辑模型" open={isEditModelOpen} onOk={() => void handleEditModel()} onCancel={() => setIsEditModelOpen(false)} destroyOnHidden>
+                <Form form={editModelForm} layout="vertical">
+                    <Row gutter={16}>
+                        <Col span={12}><Form.Item name="provider" label="服务商" rules={[{ required: true, message: "请输入服务商" }]}><Input /></Form.Item></Col>
+                        <Col span={12}><Form.Item name="model" label="模型名称" rules={[{ required: true, message: "请输入模型名称" }]}><Input /></Form.Item></Col>
+                        <Col span={12}><Form.Item name="displayName" label="显示名称"><Input /></Form.Item></Col>
+                        <Col span={12}>
+                            <Form.Item name="type" label="类型" rules={[{ required: true, message: "请选择类型" }]}>
+                                <Select mode="multiple" options={MODEL_TYPE_OPTIONS.map((t) => ({ label: t, value: t }))} />
+                            </Form.Item>
+                        </Col>
+                        <Col span={12}>
+                            <Form.Item name="maxSize" label="最大尺寸">
+                                <Select allowClear placeholder="自动" options={MODEL_SIZE_OPTIONS.map((s) => ({ label: SIZE_LABELS[s] || s, value: s }))} />
+                            </Form.Item>
+                        </Col>
+                    </Row>
+                </Form>
+            </Modal>
 
             <Modal title="选择模型" open={isModelSelectorOpen} width={840} onOk={confirmModelSelection} onCancel={() => setIsModelSelectorOpen(false)}
                 footer={<Space><Button onClick={() => setIsModelSelectorOpen(false)}>取消</Button><Button type="primary" onClick={confirmModelSelection}>确定</Button></Space>} destroyOnHidden>
