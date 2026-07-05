@@ -136,8 +136,6 @@ export default function AdminModelsPage() {
     const [modelsPage, setModelsPage] = useState(1);
     const [modelsLoading, setModelsLoading] = useState(false);
     const [modelDrafts, setModelDrafts] = useState<Record<number, Partial<AdminModelInfo>>>({});
-    const [isEditModelOpen, setIsEditModelOpen] = useState(false);
-    const [editModelForm] = Form.useForm<AdminModelInfo>();
     const pageSizeModels = 30;
     const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
@@ -209,15 +207,30 @@ export default function AdminModelsPage() {
         form.setFieldsValue(merged);
         return merged;
     }
-    const openModelConfigDrawer = () => {
-        modelConfigForm.resetFields();
-        modelConfigForm.setFieldsValue(emptyModelConfig);
+    const [editingChannelIndex, setEditingChannelIndex] = useState<number | null>(null);
+    const openModelConfigDrawer = (record?: AdminModelInfo) => {
+        if (record) {
+            // 编辑模式：根据模型行找到对应渠道，预填表单
+            const idx = modelConfigs.findIndex((ch) => (ch.name || "").trim() === (record.provider || "").trim());
+            if (idx >= 0) {
+                modelConfigForm.setFieldsValue(modelConfigs[idx]);
+                setEditingChannelIndex(idx);
+            } else {
+                modelConfigForm.setFieldsValue({ ...emptyModelConfig, name: record.provider || "" });
+                setEditingChannelIndex(null);
+            }
+        } else {
+            modelConfigForm.resetFields();
+            modelConfigForm.setFieldsValue(emptyModelConfig);
+            setEditingChannelIndex(null);
+        }
         setIsModelConfigDrawerOpen(true);
     };
     const closeModelConfigDrawer = () => {
         setIsModelConfigDrawerOpen(false);
         setIsModelSelectorOpen(false);
         modelConfigForm.resetFields();
+        setEditingChannelIndex(null);
     };
     const saveModelConfig = async () => {
         if (!token) return;
@@ -228,11 +241,13 @@ export default function AdminModelsPage() {
                 message.warning("请至少填写一个模型名称");
                 return;
             }
-            const next = [...modelConfigs, config];
+            const next = editingChannelIndex != null
+                ? modelConfigs.map((ch, i) => (i === editingChannelIndex ? config : ch))
+                : [...modelConfigs, config];
             await persistModelConfigs(next);
             const syncResult = await refreshAdminModelCatalog(token);
             closeModelConfigDrawer();
-            message.success(syncResult.synced > 0 ? `模型已新增（${syncResult.synced} 个）` : "模型配置已保存，模型清单中没有新增项");
+            message.success(syncResult.synced > 0 ? `模型已${editingChannelIndex != null ? "更新" : "新增"}（同步 ${syncResult.synced} 个）` : "模型配置已保存，模型清单中没有新增项");
             const nextKeyword = syncResult.synced > 0 ? "" : config.models[0] || "";
             setModelsKeyword(nextKeyword);
             setModelsTypeFilter("");
@@ -282,29 +297,6 @@ export default function AdminModelsPage() {
         modelConfigForm.setFieldValue("models", models);
         setIsModelSelectorOpen(false);
         message.success(`已选择 ${models.length} 个模型`);
-    };
-
-    const openEditModel = (record: AdminModelInfo) => {
-        editModelForm.setFieldsValue({
-            ...record,
-            type: normalizeModelTypes(record.type || "text").split(",") as any,
-        });
-        setIsEditModelOpen(true);
-    };
-    const handleEditModel = async () => {
-        if (!token) return;
-        try {
-            const values = await editModelForm.validateFields();
-            const type = Array.isArray(values.type) ? values.type.join(",") : normalizeModelTypes(values.type || "text");
-            await saveAdminModel(token, { ...values, type });
-            message.success("已保存");
-            setIsEditModelOpen(false);
-            await loadModels();
-            await loadAll();
-        } catch (e) {
-            if (e && typeof e === "object" && "errorFields" in e) return;
-            message.error(e instanceof Error ? e.message : "保存失败");
-        }
     };
 
     const handleSaveModel = async (record: AdminModelInfo) => {
@@ -380,7 +372,7 @@ export default function AdminModelsPage() {
                 <Card size="small" title="模型清单" extra={
                     <Space>
                         <Button icon={<ReloadOutlined />} loading={isLoading || modelsLoading} size="small" onClick={() => void refreshAll()}>刷新</Button>
-                        <Button type="primary" icon={<PlusOutlined />} size="small" onClick={openModelConfigDrawer}>新增模型</Button>
+                        <Button type="primary" icon={<PlusOutlined />} size="small" onClick={() => openModelConfigDrawer()}>新增模型</Button>
                     </Space>
                 }>
                     <Flex justify="space-between" align="center" gap={12} wrap style={{ marginBottom: 12 }}>
@@ -431,7 +423,7 @@ export default function AdminModelsPage() {
                                     { title: "操作", width: 176, align: "center" as const, fixed: "right" as const, render: (_: any, r: AdminModelInfo) => (
                                         <Space size={2}>
                                             <Switch size="small" checked={r.enabled} onChange={(v) => handleToggleModel(r.id, v)} />
-                                            <Button size="small" type="link" onClick={() => openEditModel(r)}>编辑</Button>
+                                            <Button size="small" type="link" onClick={() => openModelConfigDrawer(r)}>编辑</Button>
                                             <Button size="small" type="link" disabled={!modelDraftChanged(r)} onClick={() => void handleSaveModel(modelWithDraft(r))}>保存</Button>
                                             <Button size="small" type="link" danger onClick={() => handleDeleteModel(r.id, r.model)}>删除</Button>
                                         </Space>
@@ -489,7 +481,7 @@ export default function AdminModelsPage() {
                 </Card>
             </Flex>
 
-            <Drawer title="新增模型" open={isModelConfigDrawerOpen} size={560} onClose={closeModelConfigDrawer}
+            <Drawer title={editingChannelIndex != null ? "编辑模型" : "新增模型"} open={isModelConfigDrawerOpen} size={560} onClose={closeModelConfigDrawer}
                 extra={<Space><Button onClick={closeModelConfigDrawer}>取消</Button><Button type="primary" loading={isSavingModelConfig} onClick={() => void saveModelConfig()}>保存</Button></Space>} destroyOnHidden>
                 <Form form={modelConfigForm} layout="vertical" requiredMark={false} initialValues={emptyModelConfig}>
                     <Row gutter={16}>
@@ -510,27 +502,6 @@ export default function AdminModelsPage() {
                             </Form.Item>
                         </Col>
                         <Col span={24}><Form.Item name="remark" label="备注"><Input.TextArea rows={2} /></Form.Item></Col>
-                    </Row>
-                </Form>
-            </Drawer>
-
-            <Drawer title="编辑模型" open={isEditModelOpen} size={480} onClose={() => setIsEditModelOpen(false)}
-                extra={<Space><Button onClick={() => setIsEditModelOpen(false)}>取消</Button><Button type="primary" onClick={() => void handleEditModel()}>保存</Button></Space>} destroyOnHidden>
-                <Form form={editModelForm} layout="vertical" requiredMark={false}>
-                    <Row gutter={16}>
-                        <Col span={12}><Form.Item name="provider" label="服务商" rules={[{ required: true, message: "请输入服务商" }]}><Input /></Form.Item></Col>
-                        <Col span={12}><Form.Item name="model" label="模型名称" rules={[{ required: true, message: "请输入模型名称" }]}><Input /></Form.Item></Col>
-                        <Col span={12}><Form.Item name="displayName" label="显示名称"><Input /></Form.Item></Col>
-                        <Col span={12}>
-                            <Form.Item name="type" label="类型" rules={[{ required: true, message: "请选择类型" }]}>
-                                <Select mode="multiple" options={MODEL_TYPE_OPTIONS.map((t) => ({ label: t, value: t }))} />
-                            </Form.Item>
-                        </Col>
-                        <Col span={12}>
-                            <Form.Item name="maxSize" label="最大尺寸">
-                                <Select allowClear placeholder="自动" options={MODEL_SIZE_OPTIONS.map((s) => ({ label: SIZE_LABELS[s] || s, value: s }))} />
-                            </Form.Item>
-                        </Col>
                     </Row>
                 </Form>
             </Drawer>
