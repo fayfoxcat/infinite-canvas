@@ -514,8 +514,9 @@ export default function AdminModelsPage() {
                 </Form>
             </Drawer>
 
-            <Modal title="编辑模型" open={isEditModelOpen} onOk={() => void handleEditModel()} onCancel={() => setIsEditModelOpen(false)} destroyOnHidden>
-                <Form form={editModelForm} layout="vertical">
+            <Drawer title="编辑模型" open={isEditModelOpen} size={480} onClose={() => setIsEditModelOpen(false)}
+                extra={<Space><Button onClick={() => setIsEditModelOpen(false)}>取消</Button><Button type="primary" onClick={() => void handleEditModel()}>保存</Button></Space>} destroyOnHidden>
+                <Form form={editModelForm} layout="vertical" requiredMark={false}>
                     <Row gutter={16}>
                         <Col span={12}><Form.Item name="provider" label="服务商" rules={[{ required: true, message: "请输入服务商" }]}><Input /></Form.Item></Col>
                         <Col span={12}><Form.Item name="model" label="模型名称" rules={[{ required: true, message: "请输入模型名称" }]}><Input /></Form.Item></Col>
@@ -532,7 +533,7 @@ export default function AdminModelsPage() {
                         </Col>
                     </Row>
                 </Form>
-            </Modal>
+            </Drawer>
 
             <Modal title="选择模型" open={isModelSelectorOpen} width={840} onOk={confirmModelSelection} onCancel={() => setIsModelSelectorOpen(false)}
                 footer={<Space><Button onClick={() => setIsModelSelectorOpen(false)}>取消</Button><Button type="primary" onClick={confirmModelSelection}>确定</Button></Space>} destroyOnHidden>
