@@ -198,7 +198,7 @@ func applyModelInfosToPublicSetting(setting model.PublicSetting, channels []mode
 				continue
 			}
 			info, hasInfo := infoByKey[modelInfoKey(provider, modelName)]
-			if !hasInfo || !info.Enabled {
+			if hasInfo && !info.Enabled {
 				continue
 			}
 			value := ModelSelectionValue(provider, modelName)
