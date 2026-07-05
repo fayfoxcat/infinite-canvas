@@ -908,6 +908,39 @@ func modelChannelsForModel(channels []model.ModelChannel, modelSelection string)
 	return result, nil
 }
 
+// RemoveModelFromChannels 从所有渠道中移除指定模型。
+// 返回是否有渠道被修改。
+func RemoveModelFromChannels(provider, modelName string) (bool, error) {
+	settings, err := repository.GetSettings()
+	if err != nil {
+		return false, err
+	}
+	changed := false
+	for i := range settings.Private.Channels {
+		ch := &settings.Private.Channels[i]
+		if !ch.Enabled {
+			continue
+		}
+		chProvider := modelChannelProvider(*ch)
+		if chProvider != provider {
+			continue
+		}
+		filtered := make([]string, 0, len(ch.Models))
+		for _, m := range ch.Models {
+			if strings.TrimSpace(m) != modelName {
+				filtered = append(filtered, m)
+			} else {
+				changed = true
+			}
+		}
+		ch.Models = filtered
+	}
+	if changed {
+		_, err = repository.SaveSettings(settings, now())
+	}
+	return changed, err
+}
+
 // SyncModelInfos 从渠道模型列表同步到 model_infos 表。
 // 新模型自动创建，已存在的模型保留用户编辑的元数据。
 func SyncModelInfos(channels []model.ModelChannel) (int, error) {

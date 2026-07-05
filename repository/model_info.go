@@ -135,6 +135,19 @@ func ToggleModelInfo(id uint, enabled bool) error {
 	return db.Model(&model.ModelInfo{}).Where("id = ?", id).Update("enabled", enabled).Error
 }
 
+// GetModelInfoByID 按 ID 查询模型。
+func GetModelInfoByID(id uint) (model.ModelInfo, bool, error) {
+	db, err := DB()
+	if err != nil {
+		return model.ModelInfo{}, false, err
+	}
+	var item model.ModelInfo
+	if err := db.Where("id = ?", id).Limit(1).Find(&item).Error; err != nil {
+		return model.ModelInfo{}, false, err
+	}
+	return item, item.ID > 0, nil
+}
+
 // DeleteModelInfo 删除模型。
 func DeleteModelInfo(id uint) error {
 	db, err := DB()

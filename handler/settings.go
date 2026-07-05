@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"strconv"
 
@@ -140,9 +141,23 @@ func AdminDeleteModel(w http.ResponseWriter, r *http.Request, id string) {
 		Fail(w, "ID 格式错误")
 		return
 	}
+	// 删除前获取模型信息，用于清理渠道
+	info, ok, err := repository.GetModelInfoByID(uint(uid))
+	if err != nil {
+		FailError(w, err)
+		return
+	}
+	if !ok {
+		Fail(w, "模型不存在")
+		return
+	}
 	if err := repository.DeleteModelInfo(uint(uid)); err != nil {
 		FailError(w, err)
 		return
+	}
+	// 同步从渠道中移除该模型，避免重新出现在前端列表
+	if _, err := service.RemoveModelFromChannels(info.Provider, info.Model); err != nil {
+		log.Printf("remove model from channels failed: provider=%s model=%s err=%v", info.Provider, info.Model, err)
 	}
 	OK(w, true)
 }
